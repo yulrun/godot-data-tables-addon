@@ -7,6 +7,7 @@
 ## @meta_author: Matthew Janes (YulRun Dev)
 ## @meta_license: MIT 
 
+@tool
 class_name DataTable extends Resource
 
 

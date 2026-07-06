@@ -7,7 +7,7 @@
 ## @meta_author: Matthew Janes (YulRun Dev)
 ## @meta_license: MIT 
 
-@abstract
+@tool @abstract
 class_name DataStructure extends Resource
 
 
