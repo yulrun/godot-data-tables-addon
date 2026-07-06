@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://ksyl4yy0v23l"]
+
+[ext_resource type="Script" uid="uid://dma3ix6p7xhpi" path="res://addons/GodotDataTables/editor/data_table_dock.gd" id="1_aju01"]
+[ext_resource type="PackedScene" uid="uid://4q3kwjnxqi2i" path="res://addons/GodotDataTables/editor/structure_panel.tscn" id="2_104kd"]
+[ext_resource type="PackedScene" uid="uid://dfirm51lwymnl" path="res://addons/GodotDataTables/editor/data_table_panel.tscn" id="3_v5usa"]
+
+[node name="DataTableDock" type="Control" unique_id=1421849086]
+custom_minimum_size = Vector2(0, 300)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_aju01")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=976397725]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TabContainer" type="TabContainer" parent="VBoxContainer" unique_id=408786424]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+current_tab = 0
+
+[node name="StructurePanel" parent="VBoxContainer/TabContainer" unique_id=682471999 instance=ExtResource("2_104kd")]
+unique_name_in_owner = true
+layout_mode = 2
+metadata/_tab_index = 0
+
+[node name="DataTablePanel" parent="VBoxContainer/TabContainer" unique_id=1239353791 instance=ExtResource("3_v5usa")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+metadata/_tab_index = 1

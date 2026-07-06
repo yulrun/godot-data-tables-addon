@@ -1,0 +1,85 @@
+[gd_scene format=3 uid="uid://dfirm51lwymnl"]
+
+[ext_resource type="Script" uid="uid://pj5gib4xgyvk" path="res://addons/GodotDataTables/editor/data_table_panel.gd" id="1_rhp01"]
+
+[node name="DataTablePanel" type="MarginContainer" unique_id=1239353791]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+script = ExtResource("1_rhp01")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=1604448537]
+layout_mode = 2
+
+[node name="Toolbar" type="HBoxContainer" parent="VBoxContainer" unique_id=1474387420]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/Toolbar" unique_id=1361021078]
+layout_mode = 2
+text = "Active Table:"
+
+[node name="CurrentTableLabel" type="Label" parent="VBoxContainer/Toolbar" unique_id=1592819480]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "None Loaded"
+
+[node name="BtnNewTable" type="Button" parent="VBoxContainer/Toolbar" unique_id=1216440642]
+unique_name_in_owner = true
+layout_mode = 2
+text = "New Table"
+
+[node name="BtnLoadTable" type="Button" parent="VBoxContainer/Toolbar" unique_id=1396615891]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Load Table"
+
+[node name="VSeparator" type="VSeparator" parent="VBoxContainer/Toolbar" unique_id=1088817004]
+layout_mode = 2
+
+[node name="BtnImport" type="Button" parent="VBoxContainer/Toolbar" unique_id=1822226827]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Import..."
+
+[node name="BtnExport" type="Button" parent="VBoxContainer/Toolbar" unique_id=985451399]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Export..."
+
+[node name="HSeparator" type="HSeparator" parent="VBoxContainer" unique_id=100385767]
+layout_mode = 2
+
+[node name="Workspace" type="HBoxContainer" parent="VBoxContainer" unique_id=1742118454]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TableGrid" type="Tree" parent="VBoxContainer/Workspace" unique_id=83506344]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+hide_root = true
+select_mode = 1
+
+[node name="HSeparator2" type="HSeparator" parent="VBoxContainer" unique_id=1229254928]
+layout_mode = 2
+
+[node name="ActionRow" type="HBoxContainer" parent="VBoxContainer" unique_id=612748609]
+layout_mode = 2
+
+[node name="BtnAddRow" type="Button" parent="VBoxContainer/ActionRow" unique_id=19218145]
+unique_name_in_owner = true
+layout_mode = 2
+text = "+ Add Data Row"
+
+[node name="BtnSaveTable" type="Button" parent="VBoxContainer/ActionRow" unique_id=1078789099]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 10
+text = "Save Table"
