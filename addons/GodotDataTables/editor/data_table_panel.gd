@@ -47,17 +47,22 @@ var dirty_rows: Dictionary = {}
 #region Dynamic UI Elements
 var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
+var clear_confirm: ConfirmationDialog
+var close_confirm: ConfirmationDialog
 
 ## A dynamically generated, transparent pillar icon used to enforce fixed column widths safely on high-DPI displays.
 var empty_icon: ImageTexture
 
 @onready var current_table_label: Label = %CurrentTableLabel
 @onready var tree: Tree = %TableGrid
+@onready var filter_bar: LineEdit = %FilterBar
 @onready var btn_new_table: Button = %BtnNewTable
 @onready var btn_load_table: Button = %BtnLoadTable
 @onready var btn_import: Button = %BtnImport
 @onready var btn_export: Button = %BtnExport
 @onready var btn_add_row: Button = %BtnAddRow
+@onready var btn_clear_table: Button = %BtnClearTable
+@onready var btn_close_table: Button = %BtnCloseTable
 @onready var btn_save_table: Button = %BtnSaveTable
 #endregion
 
@@ -70,13 +75,17 @@ func _ready() -> void:
 	_initialize_dynamic_dialogs()
 	
 	# Dynamically match the exact size of the Editor's warning icon to prevent column popping on high-DPI displays.
-	# By assigning a completely transparent image of the exact same size to "clean" rows, the column width never shifts.
 	var warning_tex: Texture2D = _get_safe_theme_icon("NodeWarning")
 	var icon_size: Vector2 = warning_tex.get_size()
 	var empty_img := Image.create_empty(int(icon_size.x), int(icon_size.y), false, Image.FORMAT_RGBA8)
 	empty_icon = ImageTexture.create_from_image(empty_img)
 	
 	# Apply Native Editor Icons & Tooltips
+	filter_bar.right_icon = _get_safe_theme_icon("Search")
+	filter_bar.clear_button_enabled = true
+	filter_bar.placeholder_text = "Filter Data..."
+	filter_bar.text_changed.connect(_on_filter_text_changed)
+	
 	btn_new_table.icon = _get_safe_theme_icon("New")
 	btn_new_table.tooltip_text = "Create a new DataTable .tres database."
 	btn_load_table.icon = _get_safe_theme_icon("Load")
@@ -87,6 +96,10 @@ func _ready() -> void:
 	btn_export.tooltip_text = "Export this table to CSV/JSON."
 	btn_add_row.icon = _get_safe_theme_icon("Add")
 	btn_add_row.tooltip_text = "Add a new data row to the active table."
+	btn_clear_table.icon = _get_safe_theme_icon("Clear")
+	btn_clear_table.tooltip_text = "Wipe all data rows from the active table."
+	btn_close_table.icon = _get_safe_theme_icon("Close")
+	btn_close_table.tooltip_text = "Close the active table workspace."
 	btn_save_table.icon = _get_safe_theme_icon("Save")
 	btn_save_table.tooltip_text = "Force save the current table to disk."
 	
@@ -95,6 +108,8 @@ func _ready() -> void:
 	btn_import.pressed.connect(_on_import_pressed)
 	btn_export.pressed.connect(_on_export_pressed)
 	btn_add_row.pressed.connect(_on_add_row_pressed)
+	btn_clear_table.pressed.connect(func(): clear_confirm.popup_centered())
+	btn_close_table.pressed.connect(_on_close_table_pressed)
 	btn_save_table.pressed.connect(_on_save_pressed)
 	
 	tree.item_edited.connect(_on_cell_edited)
@@ -117,6 +132,16 @@ func _initialize_dynamic_dialogs() -> void:
 	duplicate_confirm.dialog_text = "Duplicate this row?"
 	duplicate_confirm.confirmed.connect(_execute_row_duplication)
 	add_child(duplicate_confirm)
+	
+	clear_confirm = ConfirmationDialog.new()
+	clear_confirm.dialog_text = "Are you sure you want to completely clear this table? This action will delete all rows."
+	clear_confirm.confirmed.connect(_execute_clear_table)
+	add_child(clear_confirm)
+	
+	close_confirm = ConfirmationDialog.new()
+	close_confirm.dialog_text = "You have unsaved changes. Are you sure you want to close this table without saving?"
+	close_confirm.confirmed.connect(_execute_close_table)
+	add_child(close_confirm)
 
 
 ## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
@@ -131,9 +156,12 @@ func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 func _update_ui_state() -> void:
 	var has_table: bool = is_instance_valid(active_table)
 	btn_add_row.disabled = not has_table
+	btn_clear_table.disabled = not has_table
+	btn_close_table.disabled = not has_table
 	btn_save_table.disabled = not has_table
 	btn_import.disabled = not has_table
 	btn_export.disabled = not has_table
+	filter_bar.editable = has_table
 	
 	if has_table:
 		if is_dirty:
@@ -148,6 +176,7 @@ func _update_ui_state() -> void:
 	else:
 		current_table_label.text = "None Loaded"
 		current_table_label.remove_theme_color_override("font_color")
+		filter_bar.text = ""
 #endregion
 
 
@@ -160,6 +189,10 @@ func refresh_current_table_view() -> void:
 	# Ensures the data matches the blueprint before rendering to prevent crash errors
 	active_table.sanitize_all_rows()
 	_rebuild_tree_grid()
+	
+	# Re-apply any active search filters after the rebuild
+	if not filter_bar.text.is_empty():
+		_on_filter_text_changed(filter_bar.text)
 
 
 ## Reads the assigned schema blueprint and builds the appropriate columns for the Tree widget.
@@ -211,6 +244,7 @@ func _rebuild_tree_grid() -> void:
 	
 	var root: TreeItem = tree.create_item()
 	_populate_tree_rows(root)
+	_update_row_colors()
 
 
 ## Iterates through the table's data and visually generates the row elements.
@@ -235,7 +269,6 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		elif dirty_rows.has(id) and dirty_rows[id] == true:
 			item.set_icon(0, _get_safe_theme_icon("StatusWarning"))
 			item.set_tooltip_text(0, "Unsaved Changes on Row")
-			item.set_custom_color(0, Color(1.0, 0.8, 0.4))
 		else:
 			# Invisible pillar enforces column width perfectly on high DPI displays
 			item.set_icon(0, empty_icon) 
@@ -244,11 +277,11 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		item.set_text(1, str(row_index))
 		item.set_text_alignment(1, HORIZONTAL_ALIGNMENT_CENTER)
 		item.set_editable(1, false)
-		item.set_custom_color(1, Color(0.6, 0.6, 0.6))
 		
 		# Col 2: Row ID Editor
 		item.set_text(2, str(id))
 		item.set_editable(2, true)
+		item.set_tooltip_text(2, "Type: StringName (Unique Identifier)")
 		
 		# Cols 3+: Dynamic Type Casting
 		for i: int in current_schema_properties.size():
@@ -256,6 +289,12 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			var prop: Dictionary = current_schema_properties[i]
 			var expected_type: int = prop["type"]
 			var value: Variant = row_data.get(prop["name"])
+			
+			# Apply Hover Tooltip explicitly identifying the variable type
+			var type_name: String = _get_type_to_string(expected_type)
+			if expected_type == TYPE_OBJECT and not prop.get("class_name", "").is_empty():
+				type_name = prop["class_name"]
+			item.set_tooltip_text(col_idx, "Type: " + type_name)
 			
 			# Engine Type Cast: Instantly resolves schema mismatches (e.g. schema changed a String to Int)
 			if value != null and typeof(value) != expected_type and expected_type != TYPE_OBJECT:
@@ -273,10 +312,9 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				if value and value.resource_path:
 					item.set_text(col_idx, value.resource_path.get_file())
-					item.set_tooltip_text(col_idx, value.resource_path)
+					item.set_tooltip_text(col_idx, "Type: " + type_name + "\nPath: " + value.resource_path)
 				else:
 					item.set_text(col_idx, "<empty>")
-					item.set_custom_color(col_idx, Color(0.5, 0.5, 0.5))
 					
 				item.set_editable(col_idx, false) 
 				item.add_button(col_idx, _get_safe_theme_icon("LoadQuick"), 2, false, "Assign Resource")
@@ -302,7 +340,53 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		row_index += 1
 
 
-## Instantly updates the targeted row's UI element with the warning icon without needing a full rebuild.
+## Sweeps through all visible rows and dynamically applies Zebra striping and dirty state overlays.
+func _update_row_colors() -> void:
+	var root: TreeItem = tree.get_root()
+	if not root: return
+	
+	# Fetch the user's custom editor accent color dynamically
+	var base_accent: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
+	
+	# Alpha overrides for clean readability
+	var zebra_color: Color = Color(base_accent.r, base_accent.g, base_accent.b, 0.15)
+	var dirty_color_odd: Color = Color(1.0, 0.8, 0.4, 0.20) # Golden-orange warning overlay (brighter)
+	var dirty_color_even: Color = Color(1.0, 0.8, 0.4, 0.08) # Golden-orange warning overlay (darker)
+	var default_color: Color = Color(0, 0, 0, 0) # Fully transparent
+	
+	var child: TreeItem = root.get_first_child()
+	var visible_index: int = 0
+	
+	while child:
+		if child.visible:
+			var row_id: StringName = child.get_metadata(0)
+			var is_row_dirty: bool = dirty_rows.has(row_id) and dirty_rows[row_id]
+			var is_odd: bool = (visible_index % 2 == 1)
+			
+			var target_bg: Color = default_color
+			
+			# Dirty states take priority override and maintain their own alternating rhythm
+			if is_row_dirty:
+				target_bg = dirty_color_odd if is_odd else dirty_color_even
+			elif is_odd:
+				target_bg = zebra_color
+				
+			# Apply the background across ALL columns in this row (including Actions)
+			for col: int in tree.columns:
+				child.set_custom_bg_color(col, target_bg)
+				
+				# Ensure 'empty' cells and index columns remain readable/dimmed text logic
+				if col == 1 or child.get_text(col) == "<empty>":
+					child.set_custom_color(col, Color(0.6, 0.6, 0.6))
+				else:
+					child.clear_custom_color(col)
+					
+			visible_index += 1
+			
+		child = child.get_next()
+
+
+## Instantly updates the targeted row's UI element with the warning icon and color refresh.
 func _mark_row_dirty(row_id: StringName) -> void:
 	dirty_rows[row_id] = true
 	_mark_dirty()
@@ -317,9 +401,11 @@ func _mark_row_dirty(row_id: StringName) -> void:
 			if child.get_icon(0) != _get_safe_theme_icon("NodeWarning"):
 				child.set_icon(0, _get_safe_theme_icon("StatusWarning"))
 				child.set_tooltip_text(0, "Unsaved Changes on Row")
-				child.set_custom_color(0, Color(1.0, 0.8, 0.4))
 			break
 		child = child.get_next()
+		
+	# Synchronize zebra striping to instantly apply the orange overlay rhythm
+	_update_row_colors()
 
 
 ## Flags the global workspace as dirty.
@@ -327,10 +413,64 @@ func _mark_dirty() -> void:
 	if not is_dirty and not active_table_path.is_empty():
 		is_dirty = true
 		_update_ui_state()
+
+
+## Helper enum converter for Tooltips
+func _get_type_to_string(type_enum: int) -> String:
+	match type_enum:
+		TYPE_STRING: return "String"
+		TYPE_STRING_NAME: return "StringName"
+		TYPE_INT: return "int"
+		TYPE_FLOAT: return "float"
+		TYPE_BOOL: return "bool"
+		TYPE_VECTOR2: return "Vector2"
+		TYPE_VECTOR3: return "Vector3"
+		TYPE_COLOR: return "Color"
+		TYPE_OBJECT: return "Resource"
+		_: return "Variant"
 #endregion
 
 
 #region Cell Editing & Actions
+## Hides or reveals rows natively in the Tree based on the search input across all columns.
+func _on_filter_text_changed(new_text: String) -> void:
+	var root: TreeItem = tree.get_root()
+	if not root: return
+	
+	var query := new_text.to_lower()
+	var child: TreeItem = root.get_first_child()
+	
+	while child:
+		if query.is_empty():
+			child.visible = true
+		else:
+			var match_found := false
+			
+			# Check the dictionary ID metadata first (fastest)
+			var row_id: String = str(child.get_metadata(0)).to_lower()
+			if row_id.contains(query):
+				match_found = true
+			else:
+				# Iterate over every single column's text content
+				for col: int in tree.columns:
+					var cell_text: String = child.get_text(col).to_lower()
+					
+					# Special handler: Allow users to search "true" or "false" to filter checkboxes
+					if child.get_cell_mode(col) == TreeItem.CELL_MODE_CHECK:
+						cell_text = "true" if child.is_checked(col) else "false"
+						
+					if cell_text.contains(query):
+						match_found = true
+						break
+						
+			child.visible = match_found
+			
+		child = child.get_next()
+		
+	# Ensure zebra striping remains perfect after rows are hidden
+	_update_row_colors()
+
+
 ## Catches clicks on inline cell action buttons (Duplicate, Remove, Assign Resource, Clear Resource).
 func _on_tree_button_clicked(item: TreeItem, column: int, id: int, mouse_button_index: int) -> void:
 	var action_col: int = tree.columns - 1
@@ -619,6 +759,15 @@ func _execute_row_deletion() -> void:
 		refresh_current_table_view()
 
 
+## Wipes all rows from the table after confirmation.
+func _execute_clear_table() -> void:
+	if is_instance_valid(active_table):
+		active_table.clear_table()
+		dirty_rows.clear()
+		_mark_dirty()
+		refresh_current_table_view()
+
+
 ## Executes confirmed row duplication and auto-naming.
 func _execute_row_duplication() -> void:
 	if active_table.has_row(active_row_for_duplication):
@@ -652,6 +801,30 @@ func _get_unique_row_id(base_name: String) -> StringName:
 
 
 #region File & Compilation (Import/Export/Save/Load)
+## Triggers the closing of the active table, warning the user if unsaved changes exist.
+func _on_close_table_pressed() -> void:
+	if is_dirty:
+		close_confirm.popup_centered()
+	else:
+		_execute_close_table()
+
+
+## Safely unloads the active table from the workspace and resets the UI.
+func _execute_close_table() -> void:
+	active_table_path = ""
+	active_table = null
+	is_dirty = false
+	dirty_rows.clear()
+	filter_bar.text = ""
+	
+	tree.clear()
+	tree.columns = 1
+	tree.set_column_titles_visible(false)
+	current_schema_properties.clear()
+	
+	_update_ui_state()
+
+
 ## Force pushes the resource save to disk and explicitly triggers an Editor refresh.
 func _on_save_pressed() -> void:
 	if not active_table_path.is_empty() and is_instance_valid(active_table):
