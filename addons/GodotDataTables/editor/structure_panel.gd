@@ -11,6 +11,7 @@
 class_name DataTableStructurePanel extends MarginContainer
 
 
+#region Core Properties & State
 enum SearchMode {
 	NATIVE,
 	CUSTOM
@@ -34,9 +35,13 @@ var active_row_for_deletion: HBoxContainer = null
 var active_row_for_duplication: HBoxContainer = null
 var active_dropdown_for_custom: OptionButton = null
 var current_search_mode: SearchMode = SearchMode.CUSTOM
-var is_dirty: bool = false
 
-# Dynamic UI Elements generated in code
+## Tracks if the UI has unsaved modifications pending a compile.
+var is_dirty: bool = false
+#endregion
+
+
+#region Dynamic UI Elements
 var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
 var success_dialog: AcceptDialog
@@ -52,8 +57,10 @@ var class_list: ItemList
 @onready var btn_load_schema: Button = %BtnLoadSchema
 @onready var btn_add_field: Button = %BtnAddField
 @onready var btn_compile: Button = %BtnCompile
+#endregion
 
 
+#region UI Initialization & Setup
 func _ready() -> void:
 	if not Engine.is_editor_hint():
 		return
@@ -79,6 +86,7 @@ func _ready() -> void:
 	_update_ui_state()
 
 
+## Builds native popups programmatically to keep the Scene tree clean.
 func _initialize_dynamic_dialogs() -> void:
 	delete_confirm = ConfirmationDialog.new()
 	delete_confirm.dialog_text = "Are you sure you want to remove this property?"
@@ -126,6 +134,7 @@ func _initialize_dynamic_dialogs() -> void:
 	add_child(class_picker)
 
 
+## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
 func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	var base_control := EditorInterface.get_base_control()
 	if base_control.has_theme_icon(icon_name, "EditorIcons"):
@@ -133,6 +142,34 @@ func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	return base_control.get_theme_icon("Object", "EditorIcons")
 
 
+## Flags the workspace as unsaved, updating the label with yellow warning text.
+func _mark_dirty() -> void:
+	if not is_dirty and not active_script_path.is_empty():
+		is_dirty = true
+		_update_ui_state()
+
+
+## Refreshes the top label and toggles main action buttons based on whether a script is loaded.
+func _update_ui_state() -> void:
+	var baseline_active := not active_script_path.is_empty()
+	btn_add_field.disabled = not baseline_active
+	btn_compile.disabled = not baseline_active
+	
+	if baseline_active:
+		if is_dirty:
+			current_schema_label.text = active_script_path.get_file() + " (Unsaved Changes)"
+			current_schema_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
+		else:
+			current_schema_label.text = active_script_path.get_file()
+			current_schema_label.remove_theme_color_override("font_color")
+	else:
+		current_schema_label.text = "None Loaded (Create or Load a Schema Script)"
+		current_schema_label.remove_theme_color_override("font_color")
+#endregion
+
+
+#region Row Management & Manipulation
+## Appends an interactive field mapping row to the schema builder interface.
 func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String") -> void:
 	var row := HBoxContainer.new()
 	var is_core_identifier: bool = (prop_name == "row_id")
@@ -247,6 +284,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	_mark_dirty()
 
 
+## Shifts a specific property row up in the visual hierarchy and internal array.
 func _move_row_up(row: HBoxContainer) -> void:
 	var idx: int = property_rows.find(row)
 	if idx <= 1: return # Cannot move row_id (0) or the row immediately below it (1) up
@@ -260,6 +298,7 @@ func _move_row_up(row: HBoxContainer) -> void:
 	_mark_dirty()
 
 
+## Shifts a specific property row down in the visual hierarchy and internal array.
 func _move_row_down(row: HBoxContainer) -> void:
 	var idx: int = property_rows.find(row)
 	if idx <= 0 or idx >= property_rows.size() - 1: return # Cannot move row_id (0) or the last row down
@@ -273,7 +312,7 @@ func _move_row_down(row: HBoxContainer) -> void:
 	_mark_dirty()
 
 
-## Iterates through all rows and safely disables up/down movement on boundary items
+## Iterates through all rows and safely disables up/down movement on boundary items.
 func _update_button_states() -> void:
 	for i: int in property_rows.size():
 		var row: HBoxContainer = property_rows[i]
@@ -290,6 +329,68 @@ func _update_button_states() -> void:
 			down_btn.disabled = (i == property_rows.size() - 1) # Last row cannot go down
 
 
+## Handles the confirmed deletion of a property row.
+func _execute_row_deletion() -> void:
+	if is_instance_valid(active_row_for_deletion):
+		property_rows.erase(active_row_for_deletion)
+		active_row_for_deletion.queue_free()
+		active_row_for_deletion = null
+		_update_button_states()
+		_mark_dirty()
+
+
+## Handles the confirmed duplication of a property row, auto-incrementing its name.
+func _execute_row_duplication() -> void:
+	if is_instance_valid(active_row_for_duplication):
+		var name_edit := active_row_for_duplication.get_child(0) as LineEdit
+		var type_drop := active_row_for_duplication.get_child(1) as OptionButton
+		
+		var original_name: String = name_edit.text
+		var new_name: String = _get_unique_property_name(original_name)
+		var type_string: String = type_drop.get_item_text(type_drop.selected)
+		
+		add_blank_property_row(new_name, type_string)
+		active_row_for_duplication = null
+
+
+## Generates a unique property name by appending or incrementing a trailing number.
+func _get_unique_property_name(base_name: String) -> String:
+	var existing_names: Array[String] = []
+	for row: HBoxContainer in property_rows:
+		var line_edit := row.get_child(0) as LineEdit
+		existing_names.append(line_edit.text)
+		
+	var prefix: String = base_name.rstrip("0123456789")
+	if prefix.is_empty():
+		prefix = "property_"
+		
+	var counter: int = 2
+	var regex := RegEx.new()
+	regex.compile("\\d+$")
+	var result := regex.search(base_name)
+	
+	if result:
+		counter = result.get_string().to_int() + 1
+		
+	var new_name: String = prefix + str(counter)
+	while new_name in existing_names:
+		counter += 1
+		new_name = prefix + str(counter)
+		
+	return new_name
+
+
+## Clears all visual rows from the workspace when loading a new file.
+func clear_workspace() -> void:
+	for row: HBoxContainer in property_rows:
+		if is_instance_valid(row):
+			row.queue_free()
+	property_rows.clear()
+#endregion
+
+
+#region Type Selection & Validation
+## Populates the searchable ItemList with all custom Resource scripts or Native Classes.
 func _populate_class_list(filter: String = "") -> void:
 	class_list.clear()
 	var filter_lower := filter.to_lower()
@@ -326,6 +427,7 @@ func _populate_class_list(filter: String = "") -> void:
 				class_list.set_item_metadata(item_idx, tex)
 
 
+## Called when the user confirms their custom/native class selection from the popup.
 func _on_custom_class_selected() -> void:
 	if not is_instance_valid(active_dropdown_for_custom):
 		return
@@ -345,6 +447,7 @@ func _on_custom_class_selected() -> void:
 	_mark_dirty()
 
 
+## Called when the user cancels or closes the type selection popup to safely revert the UI.
 func _on_class_picker_canceled() -> void:
 	if is_instance_valid(active_dropdown_for_custom):
 		active_dropdown_for_custom.selected = BASE_TYPES.find("String")
@@ -352,6 +455,13 @@ func _on_class_picker_canceled() -> void:
 		_mark_dirty()
 
 
+## Helper trigger for pre-compilation error prompts.
+func _show_validation_error(msg: String) -> void:
+	validation_dialog.dialog_text = msg
+	validation_dialog.popup_centered()
+
+
+## Fired via signals to validate inputs instantly upon user completion (Enter/Click-away).
 func _validate_real_time(edit: LineEdit) -> void:
 	var raw_name := edit.text.strip_edges()
 	
@@ -374,86 +484,11 @@ func _validate_real_time(edit: LineEdit) -> void:
 	if duplicate_count > 1:
 		_show_validation_error("Duplicate property name found: '" + raw_name + "'.\nProperty names must be completely unique.")
 		edit.text = ""
+#endregion
 
 
-func _execute_row_deletion() -> void:
-	if is_instance_valid(active_row_for_deletion):
-		property_rows.erase(active_row_for_deletion)
-		active_row_for_deletion.queue_free()
-		active_row_for_deletion = null
-		_update_button_states()
-		_mark_dirty()
-
-
-func _execute_row_duplication() -> void:
-	if is_instance_valid(active_row_for_duplication):
-		var name_edit := active_row_for_duplication.get_child(0) as LineEdit
-		var type_drop := active_row_for_duplication.get_child(1) as OptionButton
-		
-		var original_name: String = name_edit.text
-		var new_name: String = _get_unique_property_name(original_name)
-		var type_string: String = type_drop.get_item_text(type_drop.selected)
-		
-		add_blank_property_row(new_name, type_string)
-		active_row_for_duplication = null
-
-
-func _get_unique_property_name(base_name: String) -> String:
-	var existing_names: Array[String] = []
-	for row: HBoxContainer in property_rows:
-		var line_edit := row.get_child(0) as LineEdit
-		existing_names.append(line_edit.text)
-		
-	var prefix: String = base_name.rstrip("0123456789")
-	if prefix.is_empty():
-		prefix = "property_"
-		
-	var counter: int = 2
-	var regex := RegEx.new()
-	regex.compile("\\d+$")
-	var result := regex.search(base_name)
-	
-	if result:
-		counter = result.get_string().to_int() + 1
-		
-	var new_name: String = prefix + str(counter)
-	while new_name in existing_names:
-		counter += 1
-		new_name = prefix + str(counter)
-		
-	return new_name
-
-
-func clear_workspace() -> void:
-	for row: HBoxContainer in property_rows:
-		if is_instance_valid(row):
-			row.queue_free()
-	property_rows.clear()
-
-
-func _mark_dirty() -> void:
-	if not is_dirty and not active_script_path.is_empty():
-		is_dirty = true
-		_update_ui_state()
-
-
-func _update_ui_state() -> void:
-	var baseline_active := not active_script_path.is_empty()
-	btn_add_field.disabled = not baseline_active
-	btn_compile.disabled = not baseline_active
-	
-	if baseline_active:
-		if is_dirty:
-			current_schema_label.text = active_script_path.get_file() + " (Unsaved Changes)"
-			current_schema_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
-		else:
-			current_schema_label.text = active_script_path.get_file()
-			current_schema_label.remove_theme_color_override("font_color")
-	else:
-		current_schema_label.text = "None Loaded (Create or Load a Schema Script)"
-		current_schema_label.remove_theme_color_override("font_color")
-
-
+#region File & Compilation
+## Prompts the editor file browser to construct a pristine script destination.
 func _on_new_schema_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
@@ -471,6 +506,7 @@ func _on_new_schema_pressed() -> void:
 	dialog.popup_centered_ratio(0.5)
 
 
+## Loads an existing custom DataStructure script and reverse-engineers its property list.
 func _on_load_schema_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
@@ -488,6 +524,7 @@ func _on_load_schema_pressed() -> void:
 		
 		add_blank_property_row("row_id", "StringName")
 		
+		# Read all valid properties from the schema script natively
 		for prop: Dictionary in loaded_script.get_script_property_list():
 			if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
 				if prop["name"] == "row_id":
@@ -505,11 +542,7 @@ func _on_load_schema_pressed() -> void:
 	dialog.popup_centered_ratio(0.5)
 
 
-func _show_validation_error(msg: String) -> void:
-	validation_dialog.dialog_text = msg
-	validation_dialog.popup_centered()
-
-
+## Compiles layout row matrices into a strongly typed system file via FileAccess.
 func _on_compile_pressed() -> void:
 	if active_script_path.is_empty():
 		return
@@ -594,6 +627,7 @@ func _on_compile_pressed() -> void:
 	success_dialog.popup_centered()
 
 
+## Converts engine type constants to user-friendly strings for UI mapping.
 func _fallback_type_to_string(type_enum: int) -> String:
 	match type_enum:
 		TYPE_STRING: return "String"
@@ -606,3 +640,4 @@ func _fallback_type_to_string(type_enum: int) -> String:
 		TYPE_COLOR: return "Color"
 		TYPE_OBJECT: return "Resource"
 		_: return "Variant"
+#endregion
