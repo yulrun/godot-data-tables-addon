@@ -1,156 +1,169 @@
-## Core framework container for Godot DataTables.
-##
-## Maps StringName IDs to strongly-typed row Resources for O(1) lookup.
-## Provides the functional Dictionary-backed container for all generated data.
+## A core database container that stores and organizes strongly-typed DataStructure rows.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
 ## @meta_author: Matthew Janes (YulRun Dev)
-## @meta_license: MIT 
+## @meta_license: MIT
 
 @tool
 class_name DataTable extends Resource
 
 
-## The DataStructure template instance used as a schema archetype.
-## The Editor UI duplicates this instance to generate perfectly typed new rows.
+#region Core Properties
+## The structural blueprint that dictates the variables each row in this table possesses.
 @export var row_schema: DataStructure
 
+## Maintains the exact visual/insertion order of rows for .tres serialization.
+@export var row_order: Array[StringName] = [] 
 
-## The core dataset mapping Row IDs (StringName) to Row Data (DataStructure).
-@export var rows: Dictionary = {}:
-	set(value):
-		rows = value
-		_inject_all_ids()
-
-
-## Iterates through all rows and ensures they know their assigned IDs.
-## This is called automatically when the Resource is loaded from disk.
-func _inject_all_ids() -> void:
-	for id: StringName in rows:
-		var row: DataStructure = rows[id] as DataStructure
-		if is_instance_valid(row):
-			row._on_row_added(id)
+## The actual data payload. Key = Row ID (StringName), Value = DataStructure instance.
+@export var rows: Dictionary = {}
+#endregion
 
 
-## Adds or updates a row in the table, instantly injecting the ID context.
-func add_row(id: StringName, row: DataStructure) -> void:
-	rows[id] = row
-	row._on_row_added(id)
-	emit_changed()
-
-
-## Removes a row from the table by its unique ID.
-func remove_row(id: StringName) -> void:
-	if rows.erase(id):
-		emit_changed()
-
-
-## Retrieves a row by its unique ID. Returns null if the row does not exist.
+#region Data Access Methods
+## Retrieves a specific row instance by its unique StringName ID.
 func get_row(id: StringName) -> DataStructure:
 	return rows.get(id)
 
 
-## Checks if a specific row ID exists within the table.
+## Checks if the table currently contains a row with the specified ID.
 func has_row(id: StringName) -> bool:
 	return rows.has(id)
 
 
-## Returns an array of all row IDs currently in the table.
-func get_all_ids() -> Array[StringName]:
-	var ids: Array[StringName] = []
-	ids.assign(rows.keys())
-	return ids
+## Returns all instantiated row data strictly ordered by the visual layout array.
+func get_all_rows() -> Array:
+	var ordered_rows: Array = []
+	for id: StringName in row_order:
+		if rows.has(id):
+			ordered_rows.append(rows[id])
+	return ordered_rows
+#endregion
 
 
-## Returns an array of all instantiated row DataStructures.
-func get_all_rows() -> Array[DataStructure]:
-	var row_values: Array[DataStructure] = []
-	row_values.assign(rows.values())
-	return row_values
-
-
-## Safely wipes all data from the table and notifies the editor to save.
-func clear_table() -> void:
-	rows.clear()
+#region Row Manipulation (CRUD)
+## Injects a new row into the table, pushing its ID into the layout array.
+func add_row(id: StringName, row: DataStructure) -> void:
+	rows[id] = row
+	
+	if not id in row_order:
+		row_order.append(id)
+		
+	# Trigger the context injection so the row knows its own ID
+	if row.has_method("_on_row_added"):
+		row._on_row_added(id)
+		
 	emit_changed()
 
 
-## Duplicates an existing row into a new ID context.
+## Safely removes a row from both the active dictionary and the layout array.
+func remove_row(id: StringName) -> void:
+	if rows.has(id):
+		rows.erase(id)
+		
+	if id in row_order:
+		row_order.erase(id)
+		
+	emit_changed()
+
+
+## Wipes all data and layout states from the table.
+func clear_table() -> void:
+	rows.clear()
+	row_order.clear()
+	emit_changed()
+
+
+## Deep copies an existing row and inserts it directly below the original in the visual layout.
 func duplicate_row(original_id: StringName, new_id: StringName) -> void:
-	if not has_row(original_id):
-		push_warning("DataTable: Cannot duplicate row. Original ID does not exist: ", original_id)
-		return
+	if rows.has(original_id):
+		# Create a deep copy so nested resources don't share memory references
+		var new_row: DataStructure = rows[original_id].duplicate(true)
+		rows[new_id] = new_row
 		
-	if has_row(new_id):
-		push_warning("DataTable: Cannot duplicate row. New ID already exists: ", new_id)
-		return
-		
-	var original_row: DataStructure = get_row(original_id)
-	if is_instance_valid(original_row):
-		var new_row: DataStructure = original_row.duplicate(true) as DataStructure
-		add_row(new_id, new_row)
+		# Insert the new row directly below the original item in the visual array
+		var original_idx: int = row_order.find(original_id)
+		if original_idx != -1:
+			row_order.insert(original_idx + 1, new_id)
+		else:
+			row_order.append(new_id)
+			
+		if new_row.has_method("_on_row_added"):
+			new_row._on_row_added(new_id)
+			
+		emit_changed()
+#endregion
 
 
-## Iterates through all rows and runs their internal validation.
-## Returns a dictionary mapping Row IDs (StringName) to an array of warnings (PackedStringArray).
+#region Validation & Sanitization
+## Iterates over all rows and aggregates any custom warnings thrown by the user's '_validate_row()' overrides.
 func validate_all_rows() -> Dictionary:
-	var validation_results: Dictionary = {}
+	var warnings: Dictionary = {}
 	
 	for id: StringName in rows:
-		var row: DataStructure = rows[id] as DataStructure
-		if is_instance_valid(row):
-			var warnings: PackedStringArray = row._validate_row()
-			if not warnings.is_empty():
-				validation_results[id] = warnings
+		if rows[id].has_method("_validate_row"):
+			var result = rows[id]._validate_row()
+			
+			if typeof(result) == TYPE_PACKED_STRING_ARRAY and result.size() > 0:
+				warnings[id] = result
 				
-	return validation_results
+	return warnings
 
 
-## Validates and harmonizes all row properties with the current schema layout.
+## The core evolution engine. Safely adds, removes, or re-types properties on live data to match the schema blueprint.
 func sanitize_all_rows() -> void:
 	if not is_instance_valid(row_schema):
 		return
 		
-	var fresh_properties: Array[Dictionary] = row_schema.get_script().get_script_property_list()
-	var valid_prop_names: Array[StringName] = []
+	var schema_script: Script = row_schema.get_script()
+	var valid_props: Array[String] = []
+	var default_values: Dictionary = {}
 	
-	for prop: Dictionary in fresh_properties:
+	# Extract valid structural properties from the blueprint
+	for prop: Dictionary in schema_script.get_script_property_list():
 		if prop["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE:
-			valid_prop_names.append(prop["name"])
+			valid_props.append(prop["name"])
+			default_values[prop["name"]] = _get_default_for_type(prop["type"])
 			
 	for id: StringName in rows:
-		var row: DataStructure = rows[id] as DataStructure
-		if not is_instance_valid(row): 
-			continue
+		var row: DataStructure = rows[id]
+		var row_props: Array[Dictionary] = row.get_property_list()
 		
-		for prop: Dictionary in fresh_properties:
-			if not prop["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE: 
-				continue
+		# 1. Pruning Phase: Erase properties that no longer exist in the schema
+		for prop: Dictionary in row_props:
+			if prop["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE:
+				var p_name: String = prop["name"]
+				if not p_name in valid_props and p_name != "row_id":
+					row.set(p_name, null)
+					
+		# 2. Injection Phase: Provide zero-state defaults for newly added columns
+		for vp: String in valid_props:
+			if vp != "row_id" and row.get(vp) == null:
+				row.set(vp, default_values[vp])
 				
-			var p_name: StringName = prop["name"]
-			if row.get(p_name) == null:
-				var p_type: int = prop["type"]
-				row.set(p_name, _get_default_for_type(p_type))
-				
-	emit_changed()
+	# 3. Layout Sync Phase: Clean the array structure of any dead manual modifications
+	var cleaned_order: Array[StringName] = []
+	
+	for id: StringName in row_order:
+		if rows.has(id):
+			cleaned_order.append(id)
+			
+	for id: StringName in rows:
+		if not id in cleaned_order:
+			cleaned_order.append(id)
+			
+	row_order = cleaned_order
 
 
-## Returns a safe, type-strict default value based on Godot's Variant.Type.
-func _get_default_for_type(type: int) -> Variant:
-	match type:
-		TYPE_INT:
-			return 0
-		TYPE_FLOAT:
-			return 0.0
-		TYPE_BOOL:
-			return false
-		TYPE_STRING, TYPE_STRING_NAME:
-			return ""
-		TYPE_VECTOR2:
-			return Vector2.ZERO
-		TYPE_VECTOR3:
-			return Vector3.ZERO
-		TYPE_COLOR:
-			return Color(0, 0, 0, 1)
-		_:
-			return null
+## Helper utility resolving strictly-typed zero-states for new column generations.
+func _get_default_for_type(p_type: int) -> Variant:
+	match p_type:
+		TYPE_INT: return 0
+		TYPE_FLOAT: return 0.0
+		TYPE_BOOL: return false
+		TYPE_STRING, TYPE_STRING_NAME: return ""
+		TYPE_VECTOR2: return Vector2.ZERO
+		TYPE_VECTOR3: return Vector3.ZERO
+		TYPE_COLOR: return Color(0, 0, 0, 1)
+		_: return null
+#endregion

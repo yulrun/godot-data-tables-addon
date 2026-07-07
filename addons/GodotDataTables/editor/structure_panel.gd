@@ -60,13 +60,12 @@ func _ready() -> void:
 		
 	_initialize_dynamic_dialogs()
 	
-	# Inject native Godot Editor icons into our main action buttons
+	# Apply Native Editor Icons & Tooltips
 	btn_new_schema.icon = _get_safe_theme_icon("New")
 	btn_load_schema.icon = _get_safe_theme_icon("Load")
 	btn_add_field.icon = _get_safe_theme_icon("Add")
 	btn_compile.icon = _get_safe_theme_icon("Script")
 	
-	# Apply helpful tooltips to the global toolbars
 	btn_new_schema.tooltip_text = "Create a new DataStructure schema."
 	btn_load_schema.tooltip_text = "Load an existing DataStructure schema from disk."
 	btn_add_field.tooltip_text = "Add a new property field to the active schema."
@@ -80,7 +79,6 @@ func _ready() -> void:
 	_update_ui_state()
 
 
-## Builds native popups programmatically to keep the Scene tree clean.
 func _initialize_dynamic_dialogs() -> void:
 	delete_confirm = ConfirmationDialog.new()
 	delete_confirm.dialog_text = "Are you sure you want to remove this property?"
@@ -128,7 +126,6 @@ func _initialize_dynamic_dialogs() -> void:
 	add_child(class_picker)
 
 
-## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
 func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	var base_control := EditorInterface.get_base_control()
 	if base_control.has_theme_icon(icon_name, "EditorIcons"):
@@ -136,13 +133,12 @@ func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	return base_control.get_theme_icon("Object", "EditorIcons")
 
 
-## Appends an interactive field mapping row to the schema builder interface
 func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String") -> void:
 	var row := HBoxContainer.new()
 	var is_core_identifier: bool = (prop_name == "row_id")
 	
 	if is_core_identifier:
-		row.tooltip_text = "Default row key identifier. Cannot be modified."
+		row.tooltip_text = "Default row key identifier. Cannot be modified or moved."
 		
 	# 1. Property Name Input
 	var name_edit := LineEdit.new()
@@ -159,7 +155,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		
 	row.add_child(name_edit)
 	
-	# 2. Property Type Dropdown Selector with Native Editor Icons
+	# 2. Property Type Dropdown Selector
 	var type_dropdown := OptionButton.new()
 	type_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
@@ -204,10 +200,23 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	)
 	row.add_child(type_dropdown)
 	
-	# 3. Duplicate Action Button
+	# 3. Move Up Action Button
+	var up_btn := Button.new()
+	up_btn.icon = _get_safe_theme_icon("MoveUp")
+	up_btn.tooltip_text = "Move Property Up"
+	up_btn.pressed.connect(func(): _move_row_up(row))
+	row.add_child(up_btn)
+	
+	# 4. Move Down Action Button
+	var down_btn := Button.new()
+	down_btn.icon = _get_safe_theme_icon("MoveDown")
+	down_btn.tooltip_text = "Move Property Down"
+	down_btn.pressed.connect(func(): _move_row_down(row))
+	row.add_child(down_btn)
+	
+	# 5. Duplicate Action Button
 	var duplicate_btn := Button.new()
 	duplicate_btn.icon = _get_safe_theme_icon("ActionCopy")
-	
 	if is_core_identifier:
 		duplicate_btn.disabled = true
 	else:
@@ -218,10 +227,9 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		)
 	row.add_child(duplicate_btn)
 	
-	# 4. Row Removal Action Button
+	# 6. Row Removal Action Button
 	var delete_btn := Button.new()
 	delete_btn.icon = _get_safe_theme_icon("Remove")
-	
 	if is_core_identifier:
 		delete_btn.disabled = true
 	else:
@@ -234,10 +242,54 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	
 	fields_container.add_child(row)
 	property_rows.append(row)
+	
+	_update_button_states()
 	_mark_dirty()
 
 
-## Populates the searchable ItemList based on the active search mode
+func _move_row_up(row: HBoxContainer) -> void:
+	var idx: int = property_rows.find(row)
+	if idx <= 1: return # Cannot move row_id (0) or the row immediately below it (1) up
+	
+	var swap_row: HBoxContainer = property_rows[idx - 1]
+	property_rows[idx] = swap_row
+	property_rows[idx - 1] = row
+	
+	fields_container.move_child(row, idx - 1)
+	_update_button_states()
+	_mark_dirty()
+
+
+func _move_row_down(row: HBoxContainer) -> void:
+	var idx: int = property_rows.find(row)
+	if idx <= 0 or idx >= property_rows.size() - 1: return # Cannot move row_id (0) or the last row down
+	
+	var swap_row: HBoxContainer = property_rows[idx + 1]
+	property_rows[idx] = swap_row
+	property_rows[idx + 1] = row
+	
+	fields_container.move_child(row, idx + 1)
+	_update_button_states()
+	_mark_dirty()
+
+
+## Iterates through all rows and safely disables up/down movement on boundary items
+func _update_button_states() -> void:
+	for i: int in property_rows.size():
+		var row: HBoxContainer = property_rows[i]
+		
+		# Based on our injection order: Up is child 2, Down is child 3
+		var up_btn := row.get_child(2) as Button
+		var down_btn := row.get_child(3) as Button
+		
+		if i == 0:
+			up_btn.disabled = true
+			down_btn.disabled = true
+		else:
+			up_btn.disabled = (i == 1) # First editable row cannot go up
+			down_btn.disabled = (i == property_rows.size() - 1) # Last row cannot go down
+
+
 func _populate_class_list(filter: String = "") -> void:
 	class_list.clear()
 	var filter_lower := filter.to_lower()
@@ -274,7 +326,6 @@ func _populate_class_list(filter: String = "") -> void:
 				class_list.set_item_metadata(item_idx, tex)
 
 
-## Called when the user confirms their type selection
 func _on_custom_class_selected() -> void:
 	if not is_instance_valid(active_dropdown_for_custom):
 		return
@@ -294,7 +345,6 @@ func _on_custom_class_selected() -> void:
 	_mark_dirty()
 
 
-## Called when the user cancels or closes the type selection popup
 func _on_class_picker_canceled() -> void:
 	if is_instance_valid(active_dropdown_for_custom):
 		active_dropdown_for_custom.selected = BASE_TYPES.find("String")
@@ -302,7 +352,6 @@ func _on_class_picker_canceled() -> void:
 		_mark_dirty()
 
 
-## Fired via signals to validate inputs instantly upon user completion
 func _validate_real_time(edit: LineEdit) -> void:
 	var raw_name := edit.text.strip_edges()
 	
@@ -332,6 +381,7 @@ func _execute_row_deletion() -> void:
 		property_rows.erase(active_row_for_deletion)
 		active_row_for_deletion.queue_free()
 		active_row_for_deletion = null
+		_update_button_states()
 		_mark_dirty()
 
 
@@ -455,13 +505,11 @@ func _on_load_schema_pressed() -> void:
 	dialog.popup_centered_ratio(0.5)
 
 
-## Helper trigger for error prompts
 func _show_validation_error(msg: String) -> void:
 	validation_dialog.dialog_text = msg
 	validation_dialog.popup_centered()
 
 
-## Compiles layout row matrices into a strongly typed system file via FileAccess
 func _on_compile_pressed() -> void:
 	if active_script_path.is_empty():
 		return
@@ -472,16 +520,41 @@ func _on_compile_pressed() -> void:
 			script_open_warning.popup_centered()
 			return
 			
+	# PRE-COMPILE FULL VALIDATION PASS
 	var user_prop_count: int = 0
+	var valid_names: Array[String] = []
+	var regex := RegEx.new()
+	regex.compile("^[a-zA-Z_][a-zA-Z0-9_]*$")
+	
 	for row: HBoxContainer in property_rows:
 		var name_edit := row.get_child(0) as LineEdit
-		if name_edit.text.strip_edges() != "row_id":
-			user_prop_count += 1
+		var raw_name := name_edit.text.strip_edges()
+		
+		if raw_name == "row_id":
+			continue
+			
+		user_prop_count += 1
+		
+		if raw_name.is_empty():
+			_show_validation_error("A property name cannot be empty.")
+			return
+			
+		if not regex.search(raw_name):
+			_show_validation_error("Invalid property name: '" + raw_name + "'.\nGDScript variables must only contain letters, numbers, and underscores, and cannot start with a number.")
+			return
+			
+		var snake_name := raw_name.to_snake_case()
+		if snake_name in valid_names:
+			_show_validation_error("Duplicate property name found: '" + raw_name + "'.\nProperty names must be completely unique.")
+			return
+			
+		valid_names.append(snake_name)
 			
 	if user_prop_count == 0:
 		_show_validation_error("You must define at least one property (other than row_id) to compile a schema.")
 		return
 		
+	# WRITE PASS
 	var file := FileAccess.open(active_script_path, FileAccess.WRITE)
 	if not file:
 		printerr("GodotDataTables: Failed to open path for script generation: ", active_script_path)
@@ -514,7 +587,6 @@ func _on_compile_pressed() -> void:
 	
 	EditorInterface.get_resource_filesystem().scan()
 	
-	# Clear the dirty flag and reset UI state upon successful compilation
 	is_dirty = false
 	_update_ui_state()
 	

@@ -28,6 +28,7 @@ var dirty_rows: Dictionary = {}
 # Dynamic UI Elements generated in code
 var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
+var empty_icon: ImageTexture
 
 @onready var current_table_label: Label = %CurrentTableLabel
 @onready var tree: Tree = %TableGrid
@@ -44,6 +45,12 @@ func _ready() -> void:
 		return
 		
 	_initialize_dynamic_dialogs()
+	
+	# Dynamically match the exact size of the Editor's warning icon to prevent column popping on high-DPI displays
+	var warning_tex: Texture2D = _get_safe_theme_icon("NodeWarning")
+	var icon_size: Vector2 = warning_tex.get_size()
+	var empty_img := Image.create_empty(int(icon_size.x), int(icon_size.y), false, Image.FORMAT_RGBA8)
+	empty_icon = ImageTexture.create_from_image(empty_img)
 	
 	# Apply Native Editor Icons & Tooltips
 	btn_new_table.icon = _get_safe_theme_icon("New")
@@ -70,7 +77,7 @@ func _ready() -> void:
 	tree.button_clicked.connect(_on_tree_button_clicked)
 	
 	# Override Godot Tree drag-and-drop mechanics to allow dropping files into specific columns
-	tree.set_drag_forwarding(func(_pos): return null, _can_drop_data_fw, _drop_data_fw)
+	tree.set_drag_forwarding(_get_drag_data_fw, _can_drop_data_fw, _drop_data_fw)
 	
 	_update_ui_state()
 
@@ -124,7 +131,7 @@ func _rebuild_tree_grid() -> void:
 	# Col 0: Status & Warning Icons
 	tree.set_column_title(0, "!")
 	tree.set_column_expand(0, false)
-	tree.set_column_custom_minimum_width(0, 32)
+	tree.set_column_custom_minimum_width(0, int(empty_icon.get_size().x) + 16)
 	
 	# Col 1: Standard Spreadhseet Index Row Number
 	tree.set_column_title(1, "#")
@@ -156,14 +163,17 @@ func _populate_tree_rows(root: TreeItem) -> void:
 	var validation_results: Dictionary = active_table.validate_all_rows()
 	var row_index: int = 1
 	
-	for id: StringName in active_table.rows:
+	# Iterate over the explicit array to guarantee layout order
+	for id: StringName in active_table.row_order:
+		if not active_table.rows.has(id): continue
+		
 		var row_data: DataStructure = active_table.rows[id]
 		var item: TreeItem = tree.create_item(root)
 		
 		# Root metadata maps to the key for lookups
 		item.set_metadata(0, id)
 		
-		# Col 0: Status Icon Evaluation (Validation overrides standard unsaved dirty states)
+		# Col 0: Status Icon Evaluation
 		if validation_results.has(id):
 			item.set_icon(0, _get_safe_theme_icon("NodeWarning"))
 			item.set_tooltip_text(0, "\n".join(validation_results[id]))
@@ -171,6 +181,9 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			item.set_icon(0, _get_safe_theme_icon("StatusWarning"))
 			item.set_tooltip_text(0, "Unsaved Changes on Row")
 			item.set_custom_color(0, Color(1.0, 0.8, 0.4))
+		else:
+			# Invisible pillar enforces column width perfectly on high DPI
+			item.set_icon(0, empty_icon) 
 			
 		# Col 1: Spreadsheet Row Number
 		item.set_text(1, str(row_index))
@@ -189,7 +202,6 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			var expected_type: int = prop["type"]
 			var value: Variant = row_data.get(prop["name"])
 			
-			# Edge Case Fix: If schema changed types (e.g. String -> Int), auto-cast to resolve mismatches instantly
 			if value != null and typeof(value) != expected_type and expected_type != TYPE_OBJECT:
 				value = type_convert(value, expected_type)
 				row_data.set(prop["name"], value)
@@ -214,13 +226,11 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				item.add_button(col_idx, _get_safe_theme_icon("Reload"), 3, false, "Clear Resource")
 				
 			elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
-				# Render pure strings without "quotation" wrappers
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, str(value) if value != null else "")
 				item.set_editable(col_idx, true)
 				
 			else:
-				# Complex structs and primitives (Vector2, Color, int, float) fallback
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, var_to_str(value) if value != null else "")
 				item.set_editable(col_idx, true)
@@ -293,7 +303,6 @@ func _on_resource_file_selected(path: String) -> void:
 		
 		var row_instance: DataStructure = active_table.get_row(row_id)
 		
-		# Abort if the exact same resource was selected
 		if row_instance.get(prop_name) == loaded_res:
 			return
 			
@@ -315,11 +324,19 @@ func _on_cell_edited() -> void:
 			return
 			
 		var row_instance: DataStructure = active_table.get_row(original_id)
+		
+		# Ensure we swap it into the exact same visual position in our index array
+		var order_idx: int = active_table.row_order.find(original_id)
+		
 		active_table.remove_row(original_id)
 		active_table.add_row(new_id, row_instance)
+		
+		if order_idx != -1:
+			active_table.row_order.erase(new_id)
+			active_table.row_order.insert(order_idx, new_id)
+			
 		item.set_metadata(0, new_id)
 		
-		# Transfer dirtiness state
 		if dirty_rows.has(original_id):
 			dirty_rows.erase(original_id)
 		_mark_row_dirty(new_id)
@@ -335,7 +352,6 @@ func _on_cell_edited() -> void:
 		var current_value: Variant = row_instance.get(prop_name)
 		var new_value: Variant = current_value
 		
-		# Safely evaluate and cast the incoming text based on schema type
 		if expected_type == TYPE_BOOL:
 			new_value = item.is_checked(col)
 		elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
@@ -351,9 +367,7 @@ func _on_cell_edited() -> void:
 				if casted_value != null and str(casted_value) != "":
 					new_value = casted_value
 					
-		# Core Fix: If the value did not actually change, ABORT. Do not mark dirty or emit signals.
 		if current_value == new_value:
-			# If the user typed invalid data (like text into an int box), revert the visual cell to actual data
 			if expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
 				item.set_text(col, var_to_str(current_value))
 			return
@@ -362,49 +376,117 @@ func _on_cell_edited() -> void:
 		active_table.emit_changed()
 		_mark_row_dirty(original_id)
 		
-		# Update the display immediately if it was parsed variant text
 		if expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
 			item.set_text(col, var_to_str(new_value))
 
 
+# ---------------------------------------------------------
+# NATIVE DRAG AND DROP ENGINE
+# ---------------------------------------------------------
+
+func _get_drag_data_fw(at_position: Vector2) -> Variant:
+	var item: TreeItem = tree.get_item_at_position(at_position)
+	if not item or item == tree.get_root():
+		return null
+		
+	var row_id: StringName = item.get_metadata(0)
+	
+	var preview := Label.new()
+	preview.text = "  Moving Row: " + str(row_id) + "  "
+	preview.add_theme_stylebox_override("normal", get_theme_stylebox("panel", "TooltipPanel"))
+	tree.set_drag_preview(preview)
+	
+	return {"type": "row", "row_id": row_id}
+
+
 func _can_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
-	if typeof(data) != TYPE_DICTIONARY or not data.has("type") or data["type"] != "files":
+	if typeof(data) != TYPE_DICTIONARY or not data.has("type"):
 		return false
 		
 	var item: TreeItem = tree.get_item_at_position(at_position)
-	if not item: return false
-	
-	var col: int = tree.get_column_at_position(at_position)
-	if col < 3 or col >= tree.columns - 1:
+	if not item: 
+		tree.drop_mode_flags = Tree.DROP_MODE_DISABLED
 		return false
 		
-	var prop_idx: int = col - 3
-	if current_schema_properties[prop_idx]["type"] != TYPE_OBJECT:
-		return false
+	if data["type"] == "files":
+		tree.drop_mode_flags = Tree.DROP_MODE_ON_ITEM
+		var col: int = tree.get_column_at_position(at_position)
+		if col < 3 or col >= tree.columns - 1:
+			return false
+			
+		var prop_idx: int = col - 3
+		if current_schema_properties[prop_idx]["type"] != TYPE_OBJECT:
+			return false
+		return true
 		
-	return true
+	if data["type"] == "row":
+		if item == tree.get_root():
+			tree.drop_mode_flags = Tree.DROP_MODE_DISABLED
+			return false
+			
+		tree.drop_mode_flags = Tree.DROP_MODE_INBETWEEN
+		return true
+		
+	return false
 
 
 func _drop_data_fw(at_position: Vector2, data: Variant) -> void:
 	var item: TreeItem = tree.get_item_at_position(at_position)
-	var col: int = tree.get_column_at_position(at_position)
+	if not item: return
 	
-	var row_id: StringName = item.get_metadata(0)
-	var prop_idx: int = col - 3
-	var prop_name: StringName = current_schema_properties[prop_idx]["name"]
-	var file_path: String = data["files"][0]
-	
-	var loaded_res: Resource = load(file_path)
-	if loaded_res:
-		var row_instance: DataStructure = active_table.get_row(row_id)
+	if data["type"] == "files":
+		var col: int = tree.get_column_at_position(at_position)
+		var row_id: StringName = item.get_metadata(0)
+		var prop_idx: int = col - 3
+		var prop_name: StringName = current_schema_properties[prop_idx]["name"]
+		var file_path: String = data["files"][0]
 		
-		if row_instance.get(prop_name) == loaded_res:
-			return
+		var loaded_res: Resource = load(file_path)
+		if loaded_res:
+			var row_instance: DataStructure = active_table.get_row(row_id)
+			if row_instance.get(prop_name) == loaded_res: return
+				
+			row_instance.set(prop_name, loaded_res)
+			active_table.emit_changed()
+			_mark_row_dirty(row_id)
+			refresh_current_table_view()
+		return
+		
+	if data["type"] == "row":
+		var source_id: StringName = data["row_id"]
+		var target_id: StringName = item.get_metadata(0)
+		var drop_section: int = tree.get_drop_section_at_position(at_position)
+		
+		if source_id == target_id:
+			return 
 			
-		row_instance.set(prop_name, loaded_res)
-		active_table.emit_changed()
-		_mark_row_dirty(row_id)
-		refresh_current_table_view()
+		_reorder_row(source_id, target_id, drop_section)
+
+
+func _reorder_row(source_id: StringName, target_id: StringName, drop_section: int) -> void:
+	var order: Array[StringName] = active_table.row_order
+	var source_idx: int = order.find(source_id)
+	var target_idx: int = order.find(target_id)
+	
+	if source_idx == -1 or target_idx == -1: 
+		return
+		
+	# Adjust the layout array instead of the raw dictionary keys!
+	order.remove_at(source_idx)
+	target_idx = order.find(target_id) # Recalculate target post-removal
+	
+	if drop_section == 0: drop_section = -1 
+	
+	if drop_section == -1:
+		order.insert(target_idx, source_id)
+	else:
+		order.insert(target_idx + 1, source_id)
+		
+	active_table.emit_changed()
+	_mark_dirty()
+	refresh_current_table_view()
+
+# ---------------------------------------------------------
 
 
 func _on_add_row_pressed() -> void:
@@ -464,7 +546,6 @@ func _on_save_pressed() -> void:
 			print("GodotDataTables: Saved ", active_table_path)
 			EditorInterface.get_resource_filesystem().update_file(active_table_path)
 			
-			# Flush all dirty trackers and refresh the UI safely
 			is_dirty = false
 			dirty_rows.clear()
 			_update_ui_state()
@@ -534,7 +615,6 @@ func _on_new_table_path_selected(path: String) -> void:
 	schema_dialog.popup_centered_ratio(0.5)
 
 
-## Instantly updates the targeted row's UI element with the warning icon without needing a full rebuild
 func _mark_row_dirty(row_id: StringName) -> void:
 	dirty_rows[row_id] = true
 	_mark_dirty()
@@ -545,7 +625,6 @@ func _mark_row_dirty(row_id: StringName) -> void:
 	var child: TreeItem = root.get_first_child()
 	while child:
 		if child.get_metadata(0) == row_id:
-			# Only apply if it isn't currently overridden by a critical NodeWarning
 			if child.get_icon(0) != _get_safe_theme_icon("NodeWarning"):
 				child.set_icon(0, _get_safe_theme_icon("StatusWarning"))
 				child.set_tooltip_text(0, "Unsaved Changes on Row")
