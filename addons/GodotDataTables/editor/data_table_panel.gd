@@ -24,6 +24,9 @@ var current_schema_properties: Array[Dictionary] = []
 ## Temporarily holds the target path when a user creates a "New Table" but hasn't yet picked a schema.
 var pending_new_table_path: String = ""
 
+## Temporarily holds the target path when a user chooses a file to import.
+var pending_import_path: String = ""
+
 ## Tracks the exact TreeItem currently undergoing a Resource selection operation.
 var active_cell_item: TreeItem = null
 
@@ -49,6 +52,7 @@ var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
 var clear_confirm: ConfirmationDialog
 var close_confirm: ConfirmationDialog
+var import_conflict_dialog: ConfirmationDialog
 
 ## A dynamically generated, transparent pillar icon used to enforce fixed column widths safely on high-DPI displays.
 var empty_icon: ImageTexture
@@ -142,6 +146,20 @@ func _initialize_dynamic_dialogs() -> void:
 	close_confirm.dialog_text = "You have unsaved changes. Are you sure you want to close this table without saving?"
 	close_confirm.confirmed.connect(_execute_close_table)
 	add_child(close_confirm)
+	
+	import_conflict_dialog = ConfirmationDialog.new()
+	import_conflict_dialog.title = "Import Data Conflicts"
+	import_conflict_dialog.dialog_text = "How would you like to handle duplicate Row IDs during import?"
+	import_conflict_dialog.ok_button_text = "Overwrite Duplicates"
+	import_conflict_dialog.cancel_button_text = "Cancel Import"
+	import_conflict_dialog.add_button("Skip Duplicates", false, "skip")
+	import_conflict_dialog.confirmed.connect(func(): _execute_import(true))
+	import_conflict_dialog.custom_action.connect(func(action: StringName):
+		if action == &"skip":
+			_execute_import(false)
+			import_conflict_dialog.hide()
+	)
+	add_child(import_conflict_dialog)
 
 
 ## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
@@ -835,6 +853,9 @@ func _on_save_pressed() -> void:
 			# Forces the editor inspector to instantly reflect the changed data!
 			EditorInterface.get_resource_filesystem().update_file(active_table_path)
 			
+			# Forces Godot's FileSystem dock to visually re-index and display any new/updated files
+			EditorInterface.get_resource_filesystem().scan()
+			
 			is_dirty = false
 			dirty_rows.clear()
 			_update_ui_state()
@@ -896,6 +917,10 @@ func _on_new_table_path_selected(path: String) -> void:
 		var err: Error = ResourceSaver.save(new_table, pending_new_table_path)
 		if err == OK:
 			EditorInterface.get_resource_filesystem().update_file(pending_new_table_path)
+			
+			# Forces Godot's FileSystem dock to visually re-index and display any new/updated files
+			EditorInterface.get_resource_filesystem().scan()
+			
 			active_table_path = pending_new_table_path
 			active_table = new_table
 			is_dirty = false
@@ -907,37 +932,76 @@ func _on_new_table_path_selected(path: String) -> void:
 	schema_dialog.popup_centered_ratio(0.5)
 
 
-## Opens the unified import dialog.
+## Opens the unified import dialog allowing CSV or JSON selections.
 func _on_import_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	dialog.add_filter("*.csv", "CSV Spreadsheet")
-	dialog.add_filter("*.json", "JSON Data")
+	dialog.add_filter("*.csv, *.json", "DataTable Spreadsheets (CSV/JSON)")
 	dialog.current_dir = "res://"
 	dialog.file_selected.connect(_route_import_file)
 	add_child(dialog)
 	dialog.popup_centered_ratio(0.5)
 
 
-## Opens the unified export dialog.
+## Routes the selected import file to the conflict resolution dialog.
+func _route_import_file(path: String) -> void:
+	pending_import_path = path
+	import_conflict_dialog.popup_centered()
+
+
+## Intercepts the conflict dialog's choice and executes the specific I/O parsing routine.
+func _execute_import(overwrite: bool) -> void:
+	if pending_import_path.is_empty() or not is_instance_valid(active_table): 
+		return
+		
+	var ext := pending_import_path.get_extension().to_lower()
+	var err: Error = OK
+	
+	if ext == "json":
+		err = DataTableIO.import_from_json(active_table, pending_import_path, overwrite)
+	elif ext == "csv":
+		err = DataTableIO.import_from_csv(active_table, pending_import_path, overwrite)
+		
+	if err == OK:
+		print("GodotDataTables: Successfully imported ", pending_import_path)
+		active_table.emit_changed()
+		_mark_dirty()
+		refresh_current_table_view()
+	else:
+		printerr("GodotDataTables: Import failed with error code ", err)
+		
+	pending_import_path = ""
+
+
+## Opens the unified export dialog allowing CSV or JSON file creations.
 func _on_export_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
-	dialog.add_filter("*.csv", "CSV Spreadsheet")
-	dialog.add_filter("*.json", "JSON Data")
+	dialog.add_filter("*.csv, *.json", "DataTable Spreadsheets (CSV/JSON)")
 	dialog.current_dir = "res://"
 	dialog.file_selected.connect(_route_export_file)
 	add_child(dialog)
 	dialog.popup_centered_ratio(0.5)
 
 
-## Routes the selected file to the JSON or CSV import logic.
-func _route_import_file(path: String) -> void:
-	print("Routing import: ", path.get_extension())
-	refresh_current_table_view()
-
-
-## Routes the active data directly to a JSON or CSV output.
+## Evaluates the user's chosen extension and routes the active data to the correct serializing utility.
 func _route_export_file(path: String) -> void:
-	print("Routing export: ", path.get_extension())
+	if not is_instance_valid(active_table): 
+		return
+		
+	var ext := path.get_extension().to_lower()
+	var err: Error = OK
+	
+	if ext == "json":
+		err = DataTableIO.export_to_json(active_table, path)
+	elif ext == "csv":
+		err = DataTableIO.export_to_csv(active_table, path)
+		
+	if err == OK:
+		print("GodotDataTables: Successfully exported to ", path)
+		
+		# Forces Godot's FileSystem dock to reveal the newly created CSV/JSON immediately
+		EditorInterface.get_resource_filesystem().scan()
+	else:
+		printerr("GodotDataTables: Export failed with error code ", err)
 #endregion
