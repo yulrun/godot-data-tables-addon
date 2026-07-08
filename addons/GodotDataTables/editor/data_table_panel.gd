@@ -54,6 +54,10 @@ var clear_confirm: ConfirmationDialog
 var close_confirm: ConfirmationDialog
 var import_conflict_dialog: ConfirmationDialog
 
+var schema_picker: ConfirmationDialog
+var schema_search: LineEdit
+var schema_list: ItemList
+
 ## A dynamically generated, transparent pillar icon used to enforce fixed column widths safely on high-DPI displays.
 var empty_icon: ImageTexture
 
@@ -160,6 +164,27 @@ func _initialize_dynamic_dialogs() -> void:
 			import_conflict_dialog.hide()
 	)
 	add_child(import_conflict_dialog)
+	
+	schema_picker = ConfirmationDialog.new()
+	schema_picker.title = "Select Schema (DataStructure) for Table"
+	schema_picker.size = Vector2(400, 500)
+	
+	var picker_vbox := VBoxContainer.new()
+	picker_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	schema_picker.add_child(picker_vbox)
+	
+	schema_search = LineEdit.new()
+	schema_search.placeholder_text = "Search schemas..."
+	schema_search.text_changed.connect(_populate_schema_list)
+	picker_vbox.add_child(schema_search)
+	
+	schema_list = ItemList.new()
+	schema_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	schema_list.item_activated.connect(func(idx: int): schema_picker.get_ok_button().emit_signal("pressed"))
+	picker_vbox.add_child(schema_list)
+	
+	schema_picker.confirmed.connect(_on_schema_picker_confirmed)
+	add_child(schema_picker)
 
 
 ## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
@@ -895,41 +920,69 @@ func _on_new_table_pressed() -> void:
 	save_dialog.popup_centered_ratio(0.5)
 
 
-## Chained secondary dialog requiring the user to immediately pick a valid schema class.
+## Triggers the Schema Selection popup upon picking a new table save location.
 func _on_new_table_path_selected(path: String) -> void:
 	pending_new_table_path = path
+	schema_search.text = ""
+	_populate_schema_list()
+	schema_picker.popup_centered()
+
+
+## Populates the searchable ItemList with all custom DataStructure schemas.
+func _populate_schema_list(filter: String = "") -> void:
+	schema_list.clear()
+	var filter_lower := filter.to_lower()
+	var global_classes: Array[Dictionary] = ProjectSettings.get_global_class_list()
 	
-	var schema_dialog := EditorFileDialog.new()
-	schema_dialog.title = "Select Schema (DataStructure) for this Table"
-	schema_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	schema_dialog.add_filter("*.gd", "GDScript Schema")
-	schema_dialog.current_dir = "res://addons/GodotDataTables/data/data_structures/"
-	
-	schema_dialog.file_selected.connect(func(schema_path: String):
-		var schema_script: GDScript = load(schema_path) as GDScript
-		if not schema_script or not schema_script.can_instantiate():
-			printerr("GodotDataTables: Invalid schema selected.")
-			return
-			
-		var new_table: DataTable = DataTable.new()
-		new_table.row_schema = schema_script.new() as DataStructure
+	for cls: Dictionary in global_classes:
+		var cls_name: String = cls["class"]
+		var cls_base: String = cls["base"]
+		var cls_icon_path: String = cls.get("icon", "")
 		
-		var err: Error = ResourceSaver.save(new_table, pending_new_table_path)
-		if err == OK:
-			EditorInterface.get_resource_filesystem().update_file(pending_new_table_path)
-			
-			# Forces Godot's FileSystem dock to visually re-index and display any new/updated files
-			EditorInterface.get_resource_filesystem().scan()
-			
-			active_table_path = pending_new_table_path
-			active_table = new_table
-			is_dirty = false
-			dirty_rows.clear()
-			_update_ui_state()
-			refresh_current_table_view()
-	)
-	add_child(schema_dialog)
-	schema_dialog.popup_centered_ratio(0.5)
+		# Ensure we strictly pull custom scripts meant to act as table schemas
+		if cls_base == "DataStructure":
+			if filter_lower.is_empty() or filter_lower in cls_name.to_lower():
+				var tex: Texture2D = null
+				if not cls_icon_path.is_empty() and ResourceLoader.exists(cls_icon_path):
+					tex = load(cls_icon_path) as Texture2D
+				if not tex:
+					tex = _get_safe_theme_icon("Script")
+					
+				var item_idx := schema_list.add_item(cls_name, tex)
+				
+				# Metadata injection: we need the physical script path to instantiate the new schema later
+				schema_list.set_item_metadata(item_idx, cls["path"])
+
+
+## Completes table creation when the user picks a DataStructure schema from the popup.
+func _on_schema_picker_confirmed() -> void:
+	var selected_items: PackedInt32Array = schema_list.get_selected_items()
+	if selected_items.is_empty():
+		return
+		
+	var schema_path: String = schema_list.get_item_metadata(selected_items[0])
+	var schema_script: GDScript = load(schema_path) as GDScript
+	
+	if not schema_script or not schema_script.can_instantiate():
+		printerr("GodotDataTables: Invalid schema selected.")
+		return
+		
+	var new_table: DataTable = DataTable.new()
+	new_table.row_schema = schema_script.new() as DataStructure
+	
+	var err: Error = ResourceSaver.save(new_table, pending_new_table_path)
+	if err == OK:
+		EditorInterface.get_resource_filesystem().update_file(pending_new_table_path)
+		
+		# Forces Godot's FileSystem dock to visually re-index and display any new/updated files
+		EditorInterface.get_resource_filesystem().scan()
+		
+		active_table_path = pending_new_table_path
+		active_table = new_table
+		is_dirty = false
+		dirty_rows.clear()
+		_update_ui_state()
+		refresh_current_table_view()
 
 
 ## Opens the unified import dialog allowing CSV or JSON selections.

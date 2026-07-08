@@ -147,20 +147,29 @@ layout_mode = 2
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="FilterBar" type="LineEdit" parent="VBoxContainer/Workspace" unique_id=53076407]
+[node name="FilterToolbar" type="HBoxContainer" parent="VBoxContainer/Workspace" unique_id=286193183]
+layout_mode = 2
+
+[node name="FilterBar" type="LineEdit" parent="VBoxContainer/Workspace/FilterToolbar" unique_id=53076407]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 placeholder_text = "Filter Data..."
 editable = false
 clear_button_enabled = true
 right_icon = SubResource("DPITexture_u5ua0")
+
+[node name="BtnSaveSorting" type="Button" parent="VBoxContainer/Workspace/FilterToolbar" unique_id=1285451042]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Save the current virtual sorting order as the tables set order."
+text = "Save Sort Order"
 
 [node name="TableGrid" type="Tree" parent="VBoxContainer/Workspace" unique_id=83506344]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/v_separation = 8
 hide_root = true
 select_mode = 1
 
