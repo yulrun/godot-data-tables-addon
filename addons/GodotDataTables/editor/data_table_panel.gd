@@ -44,6 +44,15 @@ var is_dirty: bool = false
 
 ## A map tracking which specific rows have unsaved modifications to show the row-level warning icon.
 var dirty_rows: Dictionary = {}
+
+## Separates visual sorting from actual data order.
+var visual_row_order: Array[StringName] = []
+
+## Tracks the currently actively sorted column index. (-1 for none)
+var active_sort_column: int = -1
+
+## Tracks the direction of the visual sort (1 = Ascending, -1 = Descending, 0 = None)
+var active_sort_direction: int = 0
 #endregion
 
 
@@ -72,6 +81,7 @@ var empty_icon: ImageTexture
 @onready var btn_clear_table: Button = %BtnClearTable
 @onready var btn_close_table: Button = %BtnCloseTable
 @onready var btn_save_table: Button = %BtnSaveTable
+@onready var btn_save_sorting: Button = %BtnSaveSorting
 #endregion
 
 
@@ -110,6 +120,8 @@ func _ready() -> void:
 	btn_close_table.tooltip_text = "Close the active table workspace."
 	btn_save_table.icon = _get_safe_theme_icon("Save")
 	btn_save_table.tooltip_text = "Force save the current table to disk."
+	btn_save_sorting.icon = _get_safe_theme_icon("Sort")
+	btn_save_sorting.tooltip_text = "Permanently overwrite the table's saved order with the current visual sort."
 	
 	btn_new_table.pressed.connect(_on_new_table_pressed)
 	btn_load_table.pressed.connect(_on_load_table_pressed)
@@ -119,9 +131,11 @@ func _ready() -> void:
 	btn_clear_table.pressed.connect(func(): clear_confirm.popup_centered())
 	btn_close_table.pressed.connect(_on_close_table_pressed)
 	btn_save_table.pressed.connect(_on_save_pressed)
+	btn_save_sorting.pressed.connect(_on_save_sorting_pressed)
 	
 	tree.item_edited.connect(_on_cell_edited)
 	tree.button_clicked.connect(_on_tree_button_clicked)
+	tree.column_title_clicked.connect(_on_column_title_clicked)
 	
 	# Override Godot Tree drag-and-drop mechanics to allow dropping files into specific columns
 	tree.set_drag_forwarding(_get_drag_data_fw, _can_drop_data_fw, _drop_data_fw)
@@ -204,6 +218,7 @@ func _update_ui_state() -> void:
 	btn_save_table.disabled = not has_table
 	btn_import.disabled = not has_table
 	btn_export.disabled = not has_table
+	btn_save_sorting.disabled = not has_table or active_sort_direction == 0
 	filter_bar.editable = has_table
 	
 	if has_table:
@@ -231,6 +246,10 @@ func refresh_current_table_view() -> void:
 		
 	# Ensures the data matches the blueprint before rendering to prevent crash errors
 	active_table.sanitize_all_rows()
+	
+	# Ensures our visual array stays perfectly synced with new/deleted rows before sorting
+	_apply_current_sort() 
+	
 	_rebuild_tree_grid()
 	
 	# Re-apply any active search filters after the rebuild
@@ -269,14 +288,27 @@ func _rebuild_tree_grid() -> void:
 	tree.set_column_custom_minimum_width(1, 40)
 	
 	# Col 2: The Core Row ID Key
-	tree.set_column_title(2, "row_id")
+	var id_arrow := ""
+	if active_sort_column == 2:
+		if active_sort_direction == 1:
+			id_arrow = " ▲"
+		elif active_sort_direction == -1:
+			id_arrow = " ▼"
+	tree.set_column_title(2, "row_id" + id_arrow)
 	tree.set_column_expand(2, false)
 	tree.set_column_custom_minimum_width(2, 150)
 	
 	# Cols 3+: Schema Driven Data
 	for i: int in current_schema_properties.size():
 		var col_idx: int = 3 + i
-		tree.set_column_title(col_idx, current_schema_properties[i]["name"])
+		var col_arrow := ""
+		if active_sort_column == col_idx:
+			if active_sort_direction == 1:
+				col_arrow = " ▲"
+			elif active_sort_direction == -1:
+				col_arrow = " ▼"
+			
+		tree.set_column_title(col_idx, current_schema_properties[i]["name"] + col_arrow)
 		tree.set_column_expand(col_idx, true)
 		
 	# Final Col: Duplicate & Delete Actions
@@ -293,10 +325,9 @@ func _rebuild_tree_grid() -> void:
 ## Iterates through the table's data and visually generates the row elements.
 func _populate_tree_rows(root: TreeItem) -> void:
 	var validation_results: Dictionary = active_table.validate_all_rows()
-	var row_index: int = 1
 	
-	# Iterate over the explicit array to guarantee layout order is visually respected
-	for id: StringName in active_table.row_order:
+	# Iterate over the VISUAL array to natively scramble columns without corrupting save data
+	for id: StringName in visual_row_order:
 		if not active_table.rows.has(id): continue
 		
 		var row_data: DataStructure = active_table.rows[id]
@@ -316,8 +347,9 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			# Invisible pillar enforces column width perfectly on high DPI displays
 			item.set_icon(0, empty_icon) 
 			
-		# Col 1: Spreadsheet Row Number
-		item.set_text(1, str(row_index))
+		# Col 1: Spreadsheet Row Number (Tracks TRUE data index to show sorting scrambles correctly)
+		var true_index: int = active_table.row_order.find(id) + 1
+		item.set_text(1, str(true_index))
 		item.set_text_alignment(1, HORIZONTAL_ALIGNMENT_CENTER)
 		item.set_editable(1, false)
 		
@@ -379,8 +411,6 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		var action_col: int = tree.columns - 1
 		item.add_button(action_col, _get_safe_theme_icon("ActionCopy"), 0, false, "Duplicate Row")
 		item.add_button(action_col, _get_safe_theme_icon("Remove"), 1, false, "Delete Row")
-		
-		row_index += 1
 
 
 ## Sweeps through all visible rows and dynamically applies Zebra striping and dirty state overlays.
@@ -388,14 +418,11 @@ func _update_row_colors() -> void:
 	var root: TreeItem = tree.get_root()
 	if not root: return
 	
-	# Fetch the user's custom editor accent color dynamically
 	var base_accent: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
-	
-	# Alpha overrides for clean readability
 	var zebra_color: Color = Color(base_accent.r, base_accent.g, base_accent.b, 0.15)
-	var dirty_color_odd: Color = Color(1.0, 0.8, 0.4, 0.20) # Golden-orange warning overlay (brighter)
-	var dirty_color_even: Color = Color(1.0, 0.8, 0.4, 0.08) # Golden-orange warning overlay (darker)
-	var default_color: Color = Color(0, 0, 0, 0) # Fully transparent
+	var dirty_color_odd: Color = Color(1.0, 0.8, 0.4, 0.20)
+	var dirty_color_even: Color = Color(1.0, 0.8, 0.4, 0.08)
+	var default_color: Color = Color(0, 0, 0, 0) 
 	
 	var child: TreeItem = root.get_first_child()
 	var visible_index: int = 0
@@ -407,18 +434,14 @@ func _update_row_colors() -> void:
 			var is_odd: bool = (visible_index % 2 == 1)
 			
 			var target_bg: Color = default_color
-			
-			# Dirty states take priority override and maintain their own alternating rhythm
 			if is_row_dirty:
 				target_bg = dirty_color_odd if is_odd else dirty_color_even
 			elif is_odd:
 				target_bg = zebra_color
 				
-			# Apply the background across ALL columns in this row (including Actions)
 			for col: int in tree.columns:
 				child.set_custom_bg_color(col, target_bg)
-				
-				# Ensure 'empty' cells and index columns remain readable/dimmed text logic
+				# Ensure 'empty' cells and index columns remain readable
 				if col == 1 or child.get_text(col) == "<empty>":
 					child.set_custom_color(col, Color(0.6, 0.6, 0.6))
 				else:
@@ -440,14 +463,12 @@ func _mark_row_dirty(row_id: StringName) -> void:
 	var child: TreeItem = root.get_first_child()
 	while child:
 		if child.get_metadata(0) == row_id:
-			# Only apply if it isn't currently overridden by a critical NodeWarning validation failure
 			if child.get_icon(0) != _get_safe_theme_icon("NodeWarning"):
 				child.set_icon(0, _get_safe_theme_icon("StatusWarning"))
 				child.set_tooltip_text(0, "Unsaved Changes on Row")
 			break
 		child = child.get_next()
 		
-	# Synchronize zebra striping to instantly apply the orange overlay rhythm
 	_update_row_colors()
 
 
@@ -475,6 +496,93 @@ func _get_type_to_string(type_enum: int) -> String:
 
 
 #region Cell Editing & Actions
+## Triggers the visual sorting engine natively via left-click.
+func _on_column_title_clicked(column: int, mouse_button_index: int) -> void:
+	if mouse_button_index != MOUSE_BUTTON_LEFT: 
+		return
+		
+	# Cannot sort the warning column, the index column, or the actions column
+	if column < 2 or column >= tree.columns - 1:
+		return
+		
+	if active_sort_column == column:
+		# Cycle: Ascending (1) -> Descending (-1) -> Clear (0) -> Ascending (1)
+		if active_sort_direction == 1:
+			active_sort_direction = -1
+		elif active_sort_direction == -1:
+			active_sort_direction = 0
+		elif active_sort_direction == 0:
+			active_sort_direction = 1
+	else:
+		active_sort_column = column
+		active_sort_direction = 1
+		
+	refresh_current_table_view()
+
+
+## Executes the internal Godot sorting algorithm safely against arbitrary Godot variants.
+func _apply_current_sort() -> void:
+	visual_row_order = active_table.row_order.duplicate()
+	_update_ui_state()
+	
+	if active_sort_direction == 0 or active_sort_column < 2 or active_sort_column >= tree.columns - 1:
+		return
+		
+	var prop_name: StringName = &""
+	if active_sort_column == 2:
+		prop_name = &"row_id"
+	else:
+		var prop_idx: int = active_sort_column - 3
+		if prop_idx < current_schema_properties.size():
+			prop_name = current_schema_properties[prop_idx]["name"]
+			
+	if prop_name.is_empty(): return
+	
+	# Execute the custom sort on the Visual Array decoupling it from the hard-save data
+	visual_row_order.sort_custom(func(a: StringName, b: StringName):
+		var val_a: Variant
+		var val_b: Variant
+		
+		if prop_name == &"row_id":
+			val_a = str(a).to_lower()
+			val_b = str(b).to_lower()
+		else:
+			val_a = active_table.rows[a].get(prop_name)
+			val_b = active_table.rows[b].get(prop_name)
+			
+			if typeof(val_a) == TYPE_STRING or typeof(val_a) == TYPE_STRING_NAME:
+				val_a = str(val_a).to_lower()
+			if typeof(val_b) == TYPE_STRING or typeof(val_b) == TYPE_STRING_NAME:
+				val_b = str(val_b).to_lower()
+				
+		return _safe_compare(val_a, val_b, active_sort_direction == 1)
+	)
+
+
+## Safety wrapper to prevent Godot engine crashes when sorting complex resources/objects.
+func _safe_compare(a: Variant, b: Variant, asc: bool) -> bool:
+	if a == null: a = ""
+	if b == null: b = ""
+	
+	# If types mismatch or are complex objects, compare them strictly via string casting
+	if typeof(a) != typeof(b) or typeof(a) == TYPE_OBJECT or typeof(a) == TYPE_DICTIONARY or typeof(a) == TYPE_ARRAY:
+		return str(a) < str(b) if asc else str(a) > str(b)
+		
+	return a < b if asc else a > b
+
+
+## Permanently applies the visual sort to the saved data array.
+func _on_save_sorting_pressed() -> void:
+	if active_sort_direction != 0 and is_instance_valid(active_table):
+		active_table.row_order = visual_row_order.duplicate()
+		active_sort_direction = 0
+		active_sort_column = -1
+		
+		active_table.emit_changed()
+		_mark_dirty()
+		refresh_current_table_view()
+
+
 ## Hides or reveals rows natively in the Tree based on the search input across all columns.
 func _on_filter_text_changed(new_text: String) -> void:
 	var root: TreeItem = tree.get_root()
@@ -488,29 +596,19 @@ func _on_filter_text_changed(new_text: String) -> void:
 			child.visible = true
 		else:
 			var match_found := false
-			
-			# Check the dictionary ID metadata first (fastest)
 			var row_id: String = str(child.get_metadata(0)).to_lower()
 			if row_id.contains(query):
 				match_found = true
 			else:
-				# Iterate over every single column's text content
 				for col: int in tree.columns:
 					var cell_text: String = child.get_text(col).to_lower()
-					
-					# Special handler: Allow users to search "true" or "false" to filter checkboxes
 					if child.get_cell_mode(col) == TreeItem.CELL_MODE_CHECK:
 						cell_text = "true" if child.is_checked(col) else "false"
-						
 					if cell_text.contains(query):
 						match_found = true
 						break
-						
 			child.visible = match_found
-			
 		child = child.get_next()
-		
-	# Ensure zebra striping remains perfect after rows are hidden
 	_update_row_colors()
 
 
@@ -519,24 +617,24 @@ func _on_tree_button_clicked(item: TreeItem, column: int, id: int, mouse_button_
 	var action_col: int = tree.columns - 1
 	
 	if column == action_col:
-		if id == 0: # Duplicate action
+		if id == 0: 
 			active_row_for_duplication = item.get_metadata(0)
 			duplicate_confirm.popup_centered()
-		elif id == 1: # Delete action
+		elif id == 1: 
 			active_row_for_deletion = item.get_metadata(0)
 			delete_confirm.popup_centered()
 			
 	elif column >= 3 and column < action_col:
-		if id == 2: # QuickLoad resource action
+		if id == 2: 
 			active_cell_item = item
 			active_cell_column = column
 			_open_resource_picker_for_column(column)
-		elif id == 3: # Clear resource action
+		elif id == 3: 
 			var row_id: StringName = item.get_metadata(0)
 			var prop_idx: int = column - 3
 			var prop_name: StringName = current_schema_properties[prop_idx]["name"]
-			
 			var row_instance: DataStructure = active_table.get_row(row_id)
+			
 			if row_instance.get(prop_name) != null:
 				row_instance.set(prop_name, null)
 				active_table.emit_changed()
@@ -557,8 +655,6 @@ func _on_cell_edited() -> void:
 			return
 			
 		var row_instance: DataStructure = active_table.get_row(original_id)
-		
-		# Ensure we swap it into the exact same visual position in our index array
 		var order_idx: int = active_table.row_order.find(original_id)
 		
 		active_table.remove_row(original_id)
@@ -570,7 +666,6 @@ func _on_cell_edited() -> void:
 			
 		item.set_metadata(0, new_id)
 		
-		# Transfer the row's dirty state to the new key
 		if dirty_rows.has(original_id):
 			dirty_rows.erase(original_id)
 		_mark_row_dirty(new_id)
@@ -582,11 +677,9 @@ func _on_cell_edited() -> void:
 		var prop_name: StringName = prop["name"]
 		var expected_type: int = prop["type"]
 		var row_instance: DataStructure = active_table.get_row(original_id)
-		
 		var current_value: Variant = row_instance.get(prop_name)
 		var new_value: Variant = current_value
 		
-		# Safely evaluate and cast the incoming text based on schema type
 		if expected_type == TYPE_BOOL:
 			new_value = item.is_checked(col)
 		elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
@@ -594,7 +687,6 @@ func _on_cell_edited() -> void:
 		else:
 			var raw_string: String = item.get_text(col)
 			var parsed_value: Variant = str_to_var(raw_string)
-			
 			if parsed_value != null and typeof(parsed_value) == expected_type:
 				new_value = parsed_value
 			else:
@@ -602,9 +694,7 @@ func _on_cell_edited() -> void:
 				if casted_value != null and str(casted_value) != "":
 					new_value = casted_value
 					
-		# Ghost Edit Abort: If the value did not actually change, ABORT. Do not mark dirty or emit signals.
 		if current_value == new_value:
-			# Failsafe: Revert visual cell back to true data if they typed invalid strings into an int box
 			if expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
 				item.set_text(col, var_to_str(current_value))
 			return
@@ -613,7 +703,6 @@ func _on_cell_edited() -> void:
 		active_table.emit_changed()
 		_mark_row_dirty(original_id)
 		
-		# Update the display immediately if it was parsed variant text
 		if expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
 			item.set_text(col, var_to_str(new_value))
 
@@ -623,10 +712,8 @@ func _open_resource_picker_for_column(col: int) -> void:
 	var prop_idx: int = col - 3
 	var prop: Dictionary = current_schema_properties[prop_idx]
 	var class_type: String = prop.get("class_name", "")
-	
 	var base_types := PackedStringArray()
 	
-	# Map generic custom types or primitives cleanly for the popup filters
 	if class_type == "Texture2D" or class_type == "Texture":
 		base_types.append("Texture2D")
 	elif class_type == "PackedScene":
@@ -641,22 +728,16 @@ func _open_resource_picker_for_column(col: int) -> void:
 
 ## Applies the resource selected via the Quick Open dialog.
 func _on_resource_file_selected(path: String) -> void:
-	# Ghost Edit Abort: Triggers if the user hits cancel or clicks away
-	if path.is_empty() or not is_instance_valid(active_cell_item): 
-		return
-	
+	if path.is_empty() or not is_instance_valid(active_cell_item): return
 	var loaded_res: Resource = load(path)
+	
 	if loaded_res:
 		var row_id: StringName = active_cell_item.get_metadata(0)
 		var prop_idx: int = active_cell_column - 3
 		var prop_name: StringName = current_schema_properties[prop_idx]["name"]
-		
 		var row_instance: DataStructure = active_table.get_row(row_id)
 		
-		# Ghost Edit Abort: Triggers if they re-selected the exact same resource
-		if row_instance.get(prop_name) == loaded_res:
-			return
-			
+		if row_instance.get(prop_name) == loaded_res: return
 		row_instance.set(prop_name, loaded_res)
 		active_table.emit_changed()
 		_mark_row_dirty(row_id)
@@ -672,7 +753,6 @@ func _get_drag_data_fw(at_position: Vector2) -> Variant:
 		return null
 		
 	var row_id: StringName = item.get_metadata(0)
-	
 	var preview := Label.new()
 	preview.text = "  Moving Row: " + str(row_id) + "  "
 	preview.add_theme_stylebox_override("normal", get_theme_stylebox("panel", "TooltipPanel"))
@@ -693,11 +773,10 @@ func _can_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
 		
 	# 1. External Resource File Handling
 	if data["type"] == "files":
-		tree.drop_mode_flags = Tree.DROP_MODE_ON_ITEM # Highlights the specific cell being targeted
+		tree.drop_mode_flags = Tree.DROP_MODE_ON_ITEM
 		var col: int = tree.get_column_at_position(at_position)
 		if col < 3 or col >= tree.columns - 1:
 			return false
-			
 		var prop_idx: int = col - 3
 		if current_schema_properties[prop_idx]["type"] != TYPE_OBJECT:
 			return false
@@ -709,7 +788,12 @@ func _can_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
 			tree.drop_mode_flags = Tree.DROP_MODE_DISABLED
 			return false
 			
-		tree.drop_mode_flags = Tree.DROP_MODE_INBETWEEN # Draws the visual blue insertion line
+		# Enforce UX: Disable manual reordering while a visual column sort is active
+		if active_sort_direction != 0:
+			tree.drop_mode_flags = Tree.DROP_MODE_DISABLED
+			return false
+			
+		tree.drop_mode_flags = Tree.DROP_MODE_INBETWEEN
 		return true
 		
 	return false
@@ -720,7 +804,6 @@ func _drop_data_fw(at_position: Vector2, data: Variant) -> void:
 	var item: TreeItem = tree.get_item_at_position(at_position)
 	if not item: return
 	
-	# 1. Commit External Resource Drop
 	if data["type"] == "files":
 		var col: int = tree.get_column_at_position(at_position)
 		var row_id: StringName = item.get_metadata(0)
@@ -732,22 +815,17 @@ func _drop_data_fw(at_position: Vector2, data: Variant) -> void:
 		if loaded_res:
 			var row_instance: DataStructure = active_table.get_row(row_id)
 			if row_instance.get(prop_name) == loaded_res: return
-				
 			row_instance.set(prop_name, loaded_res)
 			active_table.emit_changed()
 			_mark_row_dirty(row_id)
 			refresh_current_table_view()
 		return
 		
-	# 2. Commit Row Reorder Drop
 	if data["type"] == "row":
 		var source_id: StringName = data["row_id"]
 		var target_id: StringName = item.get_metadata(0)
 		var drop_section: int = tree.get_drop_section_at_position(at_position)
-		
-		if source_id == target_id:
-			return 
-			
+		if source_id == target_id: return 
 		_reorder_row(source_id, target_id, drop_section)
 
 
@@ -757,16 +835,11 @@ func _reorder_row(source_id: StringName, target_id: StringName, drop_section: in
 	var source_idx: int = order.find(source_id)
 	var target_idx: int = order.find(target_id)
 	
-	if source_idx == -1 or target_idx == -1: 
-		return
+	if source_idx == -1 or target_idx == -1: return
 		
-	# Adjust the layout array instead of the raw dictionary keys!
-	# This ensures ResourceSaver respects the order instead of natively alphabetizing the dictionary on save.
 	order.remove_at(source_idx)
-	target_idx = order.find(target_id) # Recalculate target post-removal
-	
+	target_idx = order.find(target_id) 
 	if drop_section == 0: drop_section = -1 
-	
 	if drop_section == -1:
 		order.insert(target_idx, source_id)
 	else:
@@ -859,6 +932,9 @@ func _execute_close_table() -> void:
 	is_dirty = false
 	dirty_rows.clear()
 	filter_bar.text = ""
+	active_sort_column = -1
+	active_sort_direction = 0
+	visual_row_order.clear()
 	
 	tree.clear()
 	tree.columns = 1
@@ -874,13 +950,8 @@ func _on_save_pressed() -> void:
 		var err := ResourceSaver.save(active_table, active_table_path)
 		if err == OK:
 			print("GodotDataTables: Saved ", active_table_path)
-			
-			# Forces the editor inspector to instantly reflect the changed data!
 			EditorInterface.get_resource_filesystem().update_file(active_table_path)
-			
-			# Forces Godot's FileSystem dock to visually re-index and display any new/updated files
 			EditorInterface.get_resource_filesystem().scan()
-			
 			is_dirty = false
 			dirty_rows.clear()
 			_update_ui_state()
@@ -902,6 +973,8 @@ func _on_load_table_pressed() -> void:
 			active_table = loaded_res
 			is_dirty = false
 			dirty_rows.clear()
+			active_sort_column = -1
+			active_sort_direction = 0
 			_update_ui_state()
 			refresh_current_table_view()
 	)
@@ -939,7 +1012,6 @@ func _populate_schema_list(filter: String = "") -> void:
 		var cls_base: String = cls["base"]
 		var cls_icon_path: String = cls.get("icon", "")
 		
-		# Ensure we strictly pull custom scripts meant to act as table schemas
 		if cls_base == "DataStructure":
 			if filter_lower.is_empty() or filter_lower in cls_name.to_lower():
 				var tex: Texture2D = null
@@ -947,18 +1019,14 @@ func _populate_schema_list(filter: String = "") -> void:
 					tex = load(cls_icon_path) as Texture2D
 				if not tex:
 					tex = _get_safe_theme_icon("Script")
-					
 				var item_idx := schema_list.add_item(cls_name, tex)
-				
-				# Metadata injection: we need the physical script path to instantiate the new schema later
 				schema_list.set_item_metadata(item_idx, cls["path"])
 
 
 ## Completes table creation when the user picks a DataStructure schema from the popup.
 func _on_schema_picker_confirmed() -> void:
 	var selected_items: PackedInt32Array = schema_list.get_selected_items()
-	if selected_items.is_empty():
-		return
+	if selected_items.is_empty(): return
 		
 	var schema_path: String = schema_list.get_item_metadata(selected_items[0])
 	var schema_script: GDScript = load(schema_path) as GDScript
@@ -973,14 +1041,14 @@ func _on_schema_picker_confirmed() -> void:
 	var err: Error = ResourceSaver.save(new_table, pending_new_table_path)
 	if err == OK:
 		EditorInterface.get_resource_filesystem().update_file(pending_new_table_path)
-		
-		# Forces Godot's FileSystem dock to visually re-index and display any new/updated files
 		EditorInterface.get_resource_filesystem().scan()
 		
 		active_table_path = pending_new_table_path
 		active_table = new_table
 		is_dirty = false
 		dirty_rows.clear()
+		active_sort_column = -1
+		active_sort_direction = 0
 		_update_ui_state()
 		refresh_current_table_view()
 
@@ -1052,8 +1120,6 @@ func _route_export_file(path: String) -> void:
 		
 	if err == OK:
 		print("GodotDataTables: Successfully exported to ", path)
-		
-		# Forces Godot's FileSystem dock to reveal the newly created CSV/JSON immediately
 		EditorInterface.get_resource_filesystem().scan()
 	else:
 		printerr("GodotDataTables: Export failed with error code ", err)
