@@ -71,6 +71,8 @@ var vector_z_spin: SpinBox
 var color_edit_dialog: ConfirmationDialog
 var color_picker: ColorPicker
 
+var cell_context_menu: PopupMenu
+
 ## A dynamically generated, transparent pillar icon used to enforce fixed column widths safely on high-DPI displays.
 var empty_icon: ImageTexture
 
@@ -105,6 +107,9 @@ func _ready() -> void:
 	# Enable native Godot horizontal guides (grid lines) for clean row separation
 	tree.add_theme_constant_override("draw_guides", 1)
 	tree.add_theme_color_override("guide_color", Color(1.0, 1.0, 1.0, 0.10)) # 10% white lines
+	
+	# Force Godot to recognize right-clicks for context menus!
+	tree.allow_rmb_select = true
 	
 	# Apply Native Editor Icons & Tooltips
 	filter_bar.right_icon = _get_safe_theme_icon("Search")
@@ -142,7 +147,10 @@ func _ready() -> void:
 	btn_save_table.pressed.connect(_on_save_pressed)
 	btn_save_sorting.pressed.connect(_on_save_sorting_pressed)
 	
+	# Hook native editing signals
 	tree.item_edited.connect(_on_cell_edited)
+	tree.item_activated.connect(_on_item_activated) # Double click
+	tree.item_mouse_selected.connect(_on_item_mouse_selected) # Context click
 	tree.button_clicked.connect(_on_tree_button_clicked)
 	tree.column_title_clicked.connect(_on_column_title_clicked)
 	
@@ -188,6 +196,13 @@ func _initialize_dynamic_dialogs() -> void:
 	)
 	add_child(import_conflict_dialog)
 	
+	# Right-Click Cell Context Menu
+	cell_context_menu = PopupMenu.new()
+	cell_context_menu.add_icon_item(_get_safe_theme_icon("Clear"), "Clear Cell", 0)
+	cell_context_menu.add_icon_item(_get_safe_theme_icon("Reload"), "Reset to Default", 1)
+	cell_context_menu.id_pressed.connect(_on_cell_context_menu_id_pressed)
+	add_child(cell_context_menu)
+	
 	# Setup Native Popups for Context Editors
 	vector_edit_dialog = ConfirmationDialog.new()
 	vector_edit_dialog.title = "Edit Vector"
@@ -232,7 +247,8 @@ func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	return base_control.get_theme_icon("Object", "EditorIcons")
 
 
-## Refreshes the top label and toggles main action buttons based on whether a table is currently loaded.
+### Refreshes the top label and toggles main action buttons.
+## Now supports State-Aware colors: Transparent (None), Hint (Active), Warning (Dirty).
 func _update_ui_state() -> void:
 	var has_table: bool = is_instance_valid(active_table)
 	btn_add_row.disabled = not has_table
@@ -244,19 +260,24 @@ func _update_ui_state() -> void:
 	btn_save_sorting.disabled = not has_table or active_sort_direction == 0
 	filter_bar.editable = has_table
 	
+	# Fetch editor colors dynamically
+	var hint_color: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
+	var warning_color: Color = Color(1.0, 0.8, 0.4)
+	
 	if has_table:
 		if is_dirty:
 			current_table_label.text = active_table_path.get_file() + " (Unsaved Changes)"
-			current_table_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
+			current_table_label.add_theme_color_override("font_color", warning_color)
 		else:
 			current_table_label.text = active_table_path.get_file()
-			current_table_label.remove_theme_color_override("font_color")
+			current_table_label.add_theme_color_override("font_color", hint_color)
 			
 		if not is_instance_valid(active_table.row_schema):
 			current_table_label.text += " (WARNING: No Schema Assigned)"
 	else:
 		current_table_label.text = "None Loaded"
-		current_table_label.remove_theme_color_override("font_color")
+		# Set to transparent gray to indicate "Inactive"
+		current_table_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.5))
 		filter_bar.text = ""
 #endregion
 
@@ -338,7 +359,7 @@ func _rebuild_tree_grid() -> void:
 	var action_col: int = tree.columns - 1
 	tree.set_column_title(action_col, "Actions")
 	tree.set_column_expand(action_col, false)
-	tree.set_column_custom_minimum_width(action_col, 80)
+	tree.set_column_custom_minimum_width(action_col, 60) # Reduced to tightly wrap the two icons
 	
 	var root: TreeItem = tree.create_item()
 	_populate_tree_rows(root)
@@ -400,6 +421,15 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				type_name = prop["class_name"]
 			item.set_tooltip_text(col_idx, "Type: " + type_name)
 			
+			# SMART ALIGNMENT INJECTION
+			match expected_type:
+				TYPE_INT, TYPE_FLOAT:
+					item.set_text_alignment(col_idx, HORIZONTAL_ALIGNMENT_RIGHT)
+				TYPE_BOOL, TYPE_COLOR, TYPE_VECTOR2, TYPE_VECTOR3:
+					item.set_text_alignment(col_idx, HORIZONTAL_ALIGNMENT_CENTER)
+				_:
+					item.set_text_alignment(col_idx, HORIZONTAL_ALIGNMENT_LEFT)
+			
 			if expected_type == TYPE_BOOL:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_CHECK)
 				item.set_checked(col_idx, value as bool)
@@ -416,7 +446,6 @@ func _populate_tree_rows(root: TreeItem) -> void:
 					item.set_text(col_idx, "X: %s, Y: %s, Z: %s" % [value.x, value.y, value.z])
 					
 				item.set_editable(col_idx, false)
-				item.add_button(col_idx, _get_safe_theme_icon("Edit"), 4, false, "Edit Vector")
 				
 			elif expected_type == TYPE_COLOR:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
@@ -432,10 +461,8 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				item.set_icon(col_idx, tex)
 				
 				item.set_editable(col_idx, false)
-				item.add_button(col_idx, _get_safe_theme_icon("ColorPick"), 5, false, "Edit Color")
 				
 			elif expected_type == TYPE_OBJECT:
-				# Resource logic handles the QuickLoad and Clear action buttons instead of raw text
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				if value and value.resource_path:
 					item.set_text(col_idx, value.resource_path.get_file())
@@ -444,8 +471,6 @@ func _populate_tree_rows(root: TreeItem) -> void:
 					item.set_text(col_idx, "<empty>")
 					
 				item.set_editable(col_idx, false) 
-				item.add_button(col_idx, _get_safe_theme_icon("LoadQuick"), 2, false, "Assign Resource")
-				item.add_button(col_idx, _get_safe_theme_icon("Reload"), 3, false, "Clear Resource")
 				
 			elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
 				# Excludes quotation marks from pure string values
@@ -536,6 +561,107 @@ func _get_type_to_string(type_enum: int) -> String:
 
 
 #region Cell Editing & Context Actions
+## Handles Double-Click on protected cells to launch native Godot configuration popups.
+func _on_item_activated() -> void:
+	var item: TreeItem = tree.get_selected()
+	var col: int = tree.get_selected_column()
+	
+	if not item or col < 3 or col >= tree.columns - 1:
+		return
+		
+	var row_id: StringName = item.get_metadata(0)
+	var prop_idx: int = col - 3
+	var prop: Dictionary = current_schema_properties[prop_idx]
+	var prop_name: StringName = prop["name"]
+	var val: Variant = active_table.get_row(row_id).get(prop_name)
+	
+	if prop["type"] == TYPE_VECTOR2:
+		active_cell_item = item
+		active_cell_column = col
+		if val == null: val = Vector2.ZERO
+		vector_x_spin.value = val.x
+		vector_y_spin.value = val.y
+		vector_z_spin.get_parent().hide()
+		vector_edit_dialog.title = "Edit Vector2"
+		vector_edit_dialog.popup_centered()
+		
+	elif prop["type"] == TYPE_VECTOR3:
+		active_cell_item = item
+		active_cell_column = col
+		if val == null: val = Vector3.ZERO
+		vector_x_spin.value = val.x
+		vector_y_spin.value = val.y
+		vector_z_spin.value = val.z
+		vector_z_spin.get_parent().show()
+		vector_edit_dialog.title = "Edit Vector3"
+		vector_edit_dialog.popup_centered()
+		
+	elif prop["type"] == TYPE_COLOR:
+		active_cell_item = item
+		active_cell_column = col
+		if val == null: val = Color.BLACK
+		color_picker.color = val
+		color_edit_dialog.popup_centered()
+		
+	elif prop["type"] == TYPE_OBJECT:
+		active_cell_item = item
+		active_cell_column = col
+		_open_resource_picker_for_column(col)
+
+
+## Triggers context menu natively on Right-Click over data cells.
+func _on_item_mouse_selected(position: Vector2, mouse_button_index: int) -> void:
+	if mouse_button_index == MOUSE_BUTTON_RIGHT:
+		var item := tree.get_item_at_position(position)
+		var col := tree.get_column_at_position(position)
+		
+		# Only popup on dynamic data columns (Not Row ID, Not Actions, Not Status)
+		if item and col >= 3 and col < tree.columns - 1:
+			active_cell_item = item
+			active_cell_column = col
+			cell_context_menu.position = Vector2i(DisplayServer.mouse_get_position())
+			cell_context_menu.popup()
+
+
+## Evaluates Context Menu clicks to safely Clear or Reset cell data.
+func _on_cell_context_menu_id_pressed(id: int) -> void:
+	if not is_instance_valid(active_cell_item): return
+	
+	var row_id: StringName = active_cell_item.get_metadata(0)
+	var prop_idx: int = active_cell_column - 3
+	var prop: Dictionary = current_schema_properties[prop_idx]
+	var prop_name: StringName = prop["name"]
+	var row_instance: DataStructure = active_table.get_row(row_id)
+	var current_val = row_instance.get(prop_name)
+	
+	if id == 0: # Clear Cell
+		var empty_val = null
+		if prop["type"] == TYPE_STRING or prop["type"] == TYPE_STRING_NAME: empty_val = ""
+		elif prop["type"] == TYPE_INT or prop["type"] == TYPE_FLOAT: empty_val = 0
+		elif prop["type"] == TYPE_BOOL: empty_val = false
+		elif prop["type"] == TYPE_VECTOR2: empty_val = Vector2.ZERO
+		elif prop["type"] == TYPE_VECTOR3: empty_val = Vector3.ZERO
+		elif prop["type"] == TYPE_COLOR: empty_val = Color.BLACK
+		
+		if current_val != empty_val:
+			row_instance.set(prop_name, empty_val)
+			active_table.emit_changed()
+			_mark_row_dirty(row_id)
+			refresh_current_table_view()
+			
+	elif id == 1: # Reset to Default
+		# Instantiating a fresh schema automatically loads the designer's preset default values
+		var schema_script: GDScript = active_table.row_schema.get_script()
+		var temp_schema = schema_script.new()
+		var default_val = temp_schema.get(prop_name)
+		
+		if current_val != default_val:
+			row_instance.set(prop_name, default_val)
+			active_table.emit_changed()
+			_mark_row_dirty(row_id)
+			refresh_current_table_view()
+
+
 ## Triggers the visual sorting engine natively via left-click.
 func _on_column_title_clicked(column: int, mouse_button_index: int) -> void:
 	if mouse_button_index != MOUSE_BUTTON_LEFT: 
@@ -664,54 +790,6 @@ func _on_tree_button_clicked(item: TreeItem, column: int, id: int, mouse_button_
 		elif id == 1: # Delete Action
 			active_row_for_deletion = row_id
 			delete_confirm.popup_centered()
-			
-	elif column >= 3 and column < action_col:
-		var prop_idx: int = column - 3
-		var prop: Dictionary = current_schema_properties[prop_idx]
-		var prop_name: StringName = prop["name"]
-		
-		if id == 2: # QuickLoad Resource
-			active_cell_item = item
-			active_cell_column = column
-			_open_resource_picker_for_column(column)
-			
-		elif id == 3: # Clear Resource
-			var row_instance: DataStructure = active_table.get_row(row_id)
-			if row_instance.get(prop_name) != null:
-				row_instance.set(prop_name, null)
-				active_table.emit_changed()
-				_mark_row_dirty(row_id)
-				refresh_current_table_view()
-				
-		elif id == 4: # Edit Vector Context Menu
-			active_cell_item = item
-			active_cell_column = column
-			var val: Variant = active_table.get_row(row_id).get(prop_name)
-			
-			if prop["type"] == TYPE_VECTOR2:
-				if val == null: val = Vector2.ZERO
-				vector_x_spin.value = val.x
-				vector_y_spin.value = val.y
-				vector_z_spin.get_parent().hide()
-				vector_edit_dialog.title = "Edit Vector2"
-			elif prop["type"] == TYPE_VECTOR3:
-				if val == null: val = Vector3.ZERO
-				vector_x_spin.value = val.x
-				vector_y_spin.value = val.y
-				vector_z_spin.value = val.z
-				vector_z_spin.get_parent().show()
-				vector_edit_dialog.title = "Edit Vector3"
-				
-			vector_edit_dialog.popup_centered()
-			
-		elif id == 5: # Edit Color Context Menu
-			active_cell_item = item
-			active_cell_column = column
-			var val: Variant = active_table.get_row(row_id).get(prop_name)
-			
-			if val == null: val = Color.BLACK
-			color_picker.color = val
-			color_edit_dialog.popup_centered()
 
 
 ## Fires whenever a user hits enter or clicks away from an editable spreadsheet cell.
