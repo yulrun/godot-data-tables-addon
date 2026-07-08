@@ -65,6 +65,7 @@ var duplicate_confirm: ConfirmationDialog
 var clear_confirm: ConfirmationDialog
 var close_confirm: ConfirmationDialog
 var revert_confirm: ConfirmationDialog
+var save_sort_confirm: ConfirmationDialog
 var lock_dirty_warning: AcceptDialog
 var import_conflict_dialog: ConfirmationDialog
 
@@ -200,6 +201,12 @@ func _initialize_dynamic_dialogs() -> void:
 	revert_confirm.dialog_text = "Are you sure you want to revert all unsaved changes?\n\nThis will reload the table from disk and permanently discard your current modifications."
 	revert_confirm.confirmed.connect(_execute_revert_table)
 	add_child(revert_confirm)
+	
+	save_sort_confirm = ConfirmationDialog.new()
+	save_sort_confirm.title = "Confirm Sort Save"
+	save_sort_confirm.dialog_text = "Are you sure you want to permanently overwrite the data table's row order?\n\nThis will re-index all rows to match your current visual sort."
+	save_sort_confirm.confirmed.connect(_execute_save_sorting)
+	add_child(save_sort_confirm)
 	
 	lock_dirty_warning = AcceptDialog.new()
 	lock_dirty_warning.title = "Cannot Lock Table"
@@ -793,16 +800,20 @@ func _safe_compare(a: Variant, b: Variant, asc: bool) -> bool:
 	return a < b if asc else a > b
 
 
-## Permanently applies the visual sort to the saved data array.
+## Triggers the confirmation popup when the user wants to lock in a visual sort.
 func _on_save_sorting_pressed() -> void:
-	if active_sort_direction != 0 and is_instance_valid(active_table):
-		active_table.row_order = visual_row_order.duplicate()
-		active_sort_direction = 0
-		active_sort_column = -1
-		
-		active_table.emit_changed()
-		_mark_dirty()
-		refresh_current_table_view()
+	if not active_table or visual_row_order.is_empty(): return
+	save_sort_confirm.popup_centered()
+
+
+## Executes the permanent data re-ordering once confirmed by the user.
+func _execute_save_sorting() -> void:
+	active_table.row_order = visual_row_order.duplicate()
+	active_sort_column = -1
+	active_sort_direction = 0
+	
+	_mark_dirty()
+	refresh_current_table_view()
 
 
 ## Hides or reveals rows natively in the Tree based on the search input across all columns.
@@ -1268,13 +1279,20 @@ func _on_new_table_pressed() -> void:
 	save_dialog.popup_centered_ratio(0.5)
 
 
-## Triggers the Godot Native QuickOpen popup to bind a DataStructure schema to the new table.
+## Spawns a second file dialog explicitly to pick the .gd schema script since quick_open ignores them.
 func _on_new_table_path_selected(path: String) -> void:
 	pending_new_table_path = path
-	EditorInterface.popup_quick_open(_on_schema_picker_confirmed, PackedStringArray(["DataStructure"]))
+	
+	var schema_dialog := EditorFileDialog.new()
+	schema_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
+	schema_dialog.add_filter("*.gd", "GDScript Schema")
+	schema_dialog.current_dir = "res://addons/GodotDataTables/data/data_structures/"
+	schema_dialog.file_selected.connect(_on_schema_picker_confirmed)
+	add_child(schema_dialog)
+	schema_dialog.popup_centered_ratio(0.5)
 
 
-## Completes table creation when the user picks a DataStructure schema from the QuickOpen popup.
+## Completes table creation when the user picks a DataStructure schema from the second dialog.
 func _on_schema_picker_confirmed(schema_path: String) -> void:
 	if schema_path.is_empty(): return
 	var schema_script: GDScript = load(schema_path) as GDScript

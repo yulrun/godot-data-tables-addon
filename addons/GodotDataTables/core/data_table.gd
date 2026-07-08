@@ -4,6 +4,7 @@
 ## @meta_author: Matthew Janes (YulRun Dev)
 ## @meta_license: MIT
 
+@icon("res://addons/GodotDataTables/icons/data_table.svg")
 @tool
 class_name DataTable extends Resource
 

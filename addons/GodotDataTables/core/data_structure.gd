@@ -7,6 +7,7 @@
 ## @meta_author: Matthew Janes (YulRun Dev)
 ## @meta_license: MIT 
 
+@icon("res://addons/GodotDataTables/icons/data_table_structure.svg")
 @tool @abstract
 class_name DataStructure extends Resource
 

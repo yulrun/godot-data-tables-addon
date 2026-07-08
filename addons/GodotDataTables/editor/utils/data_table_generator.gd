@@ -24,6 +24,7 @@ static func generate_data_structure(schema_name: String, columns: Array[Dictiona
 ## @meta_author: Matthew Janes (YulRun Dev)
 ## @meta_license: MIT
 
+@icon("res://addons/GodotDataTables/icons/data_table_structure.svg")
 class_name {class_name} extends DataStructure
 
 
