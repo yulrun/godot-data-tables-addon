@@ -67,6 +67,14 @@ var schema_picker: ConfirmationDialog
 var schema_search: LineEdit
 var schema_list: ItemList
 
+var vector_edit_dialog: ConfirmationDialog
+var vector_x_spin: SpinBox
+var vector_y_spin: SpinBox
+var vector_z_spin: SpinBox
+
+var color_edit_dialog: ConfirmationDialog
+var color_picker: ColorPicker
+
 ## A dynamically generated, transparent pillar icon used to enforce fixed column widths safely on high-DPI displays.
 var empty_icon: ImageTexture
 
@@ -120,6 +128,7 @@ func _ready() -> void:
 	btn_close_table.tooltip_text = "Close the active table workspace."
 	btn_save_table.icon = _get_safe_theme_icon("Save")
 	btn_save_table.tooltip_text = "Force save the current table to disk."
+	
 	btn_save_sorting.icon = _get_safe_theme_icon("Sort")
 	btn_save_sorting.tooltip_text = "Permanently overwrite the table's saved order with the current visual sort."
 	
@@ -199,6 +208,41 @@ func _initialize_dynamic_dialogs() -> void:
 	
 	schema_picker.confirmed.connect(_on_schema_picker_confirmed)
 	add_child(schema_picker)
+	
+	# Setup Native Popups for Context Editors
+	vector_edit_dialog = ConfirmationDialog.new()
+	vector_edit_dialog.title = "Edit Vector"
+	var vec_vbox := VBoxContainer.new()
+	vector_edit_dialog.add_child(vec_vbox)
+	
+	var x_hbox := HBoxContainer.new()
+	var x_lbl := Label.new(); x_lbl.text = "X:"; x_lbl.custom_minimum_size = Vector2(20, 0)
+	vector_x_spin = SpinBox.new(); vector_x_spin.step = 0.01; vector_x_spin.allow_greater = true; vector_x_spin.allow_lesser = true; vector_x_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	x_hbox.add_child(x_lbl); x_hbox.add_child(vector_x_spin)
+	vec_vbox.add_child(x_hbox)
+	
+	var y_hbox := HBoxContainer.new()
+	var y_lbl := Label.new(); y_lbl.text = "Y:"; y_lbl.custom_minimum_size = Vector2(20, 0)
+	vector_y_spin = SpinBox.new(); vector_y_spin.step = 0.01; vector_y_spin.allow_greater = true; vector_y_spin.allow_lesser = true; vector_y_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	y_hbox.add_child(y_lbl); y_hbox.add_child(vector_y_spin)
+	vec_vbox.add_child(y_hbox)
+	
+	var z_hbox := HBoxContainer.new()
+	var z_lbl := Label.new(); z_lbl.text = "Z:"; z_lbl.custom_minimum_size = Vector2(20, 0)
+	vector_z_spin = SpinBox.new(); vector_z_spin.step = 0.01; vector_z_spin.allow_greater = true; vector_z_spin.allow_lesser = true; vector_z_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	z_hbox.add_child(z_lbl); z_hbox.add_child(vector_z_spin)
+	vec_vbox.add_child(z_hbox)
+	
+	vector_edit_dialog.confirmed.connect(_on_vector_edit_confirmed)
+	add_child(vector_edit_dialog)
+	
+	color_edit_dialog = ConfirmationDialog.new()
+	color_edit_dialog.title = "Edit Color"
+	color_picker = ColorPicker.new()
+	color_picker.edit_alpha = true
+	color_edit_dialog.add_child(color_picker)
+	color_edit_dialog.confirmed.connect(_on_color_edit_confirmed)
+	add_child(color_edit_dialog)
 
 
 ## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
@@ -365,22 +409,51 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			var expected_type: int = prop["type"]
 			var value: Variant = row_data.get(prop["name"])
 			
-			# Apply Hover Tooltip explicitly identifying the variable type
-			var type_name: String = _get_type_to_string(expected_type)
-			if expected_type == TYPE_OBJECT and not prop.get("class_name", "").is_empty():
-				type_name = prop["class_name"]
-			item.set_tooltip_text(col_idx, "Type: " + type_name)
-			
 			# Engine Type Cast: Instantly resolves schema mismatches (e.g. schema changed a String to Int)
 			if value != null and typeof(value) != expected_type and expected_type != TYPE_OBJECT:
 				value = type_convert(value, expected_type)
 				row_data.set(prop["name"], value)
 				_mark_row_dirty(id)
 				
+			# Apply Hover Tooltip explicitly identifying the variable type
+			var type_name: String = _get_type_to_string(expected_type)
+			if expected_type == TYPE_OBJECT and not prop.get("class_name", "").is_empty():
+				type_name = prop["class_name"]
+			item.set_tooltip_text(col_idx, "Type: " + type_name)
+			
 			if expected_type == TYPE_BOOL:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_CHECK)
 				item.set_checked(col_idx, value as bool)
 				item.set_editable(col_idx, true)
+				
+			elif expected_type == TYPE_VECTOR2 or expected_type == TYPE_VECTOR3:
+				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
+				if value == null:
+					value = Vector2.ZERO if expected_type == TYPE_VECTOR2 else Vector3.ZERO
+					
+				if expected_type == TYPE_VECTOR2:
+					item.set_text(col_idx, "X: %s, Y: %s" % [value.x, value.y])
+				else:
+					item.set_text(col_idx, "X: %s, Y: %s, Z: %s" % [value.x, value.y, value.z])
+					
+				item.set_editable(col_idx, false)
+				item.add_button(col_idx, _get_safe_theme_icon("Edit"), 4, false, "Edit Vector")
+				
+			elif expected_type == TYPE_COLOR:
+				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
+				if value == null:
+					value = Color.BLACK
+					
+				item.set_text(col_idx, " #" + value.to_html(false))
+				
+				# Generate a custom texture swatch on the fly to preview the color seamlessly
+				var img := Image.create_empty(24, 16, false, Image.FORMAT_RGBA8)
+				img.fill(value as Color)
+				var tex := ImageTexture.create_from_image(img)
+				item.set_icon(col_idx, tex)
+				
+				item.set_editable(col_idx, false)
+				item.add_button(col_idx, _get_safe_theme_icon("ColorPick"), 5, false, "Edit Color")
 				
 			elif expected_type == TYPE_OBJECT:
 				# Resource logic handles the QuickLoad and Clear action buttons instead of raw text
@@ -402,7 +475,7 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				item.set_editable(col_idx, true)
 				
 			else:
-				# Var_to_str cleanly converts complex structs (Vector2, Color) into human readable text
+				# Var_to_str cleanly converts complex structs (Rect2, Transforms) into human readable text
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, var_to_str(value) if value != null else "")
 				item.set_editable(col_idx, true)
@@ -495,7 +568,7 @@ func _get_type_to_string(type_enum: int) -> String:
 #endregion
 
 
-#region Cell Editing & Actions
+#region Cell Editing & Context Actions
 ## Triggers the visual sorting engine natively via left-click.
 func _on_column_title_clicked(column: int, mouse_button_index: int) -> void:
 	if mouse_button_index != MOUSE_BUTTON_LEFT: 
@@ -612,34 +685,66 @@ func _on_filter_text_changed(new_text: String) -> void:
 	_update_row_colors()
 
 
-## Catches clicks on inline cell action buttons (Duplicate, Remove, Assign Resource, Clear Resource).
+## Routes clicks on natively generated cell action buttons to their respective sub-dialogs.
 func _on_tree_button_clicked(item: TreeItem, column: int, id: int, mouse_button_index: int) -> void:
 	var action_col: int = tree.columns - 1
+	var row_id: StringName = item.get_metadata(0)
 	
 	if column == action_col:
-		if id == 0: 
-			active_row_for_duplication = item.get_metadata(0)
+		if id == 0: # Duplicate Action
+			active_row_for_duplication = row_id
 			duplicate_confirm.popup_centered()
-		elif id == 1: 
-			active_row_for_deletion = item.get_metadata(0)
+		elif id == 1: # Delete Action
+			active_row_for_deletion = row_id
 			delete_confirm.popup_centered()
 			
 	elif column >= 3 and column < action_col:
-		if id == 2: 
+		var prop_idx: int = column - 3
+		var prop: Dictionary = current_schema_properties[prop_idx]
+		var prop_name: StringName = prop["name"]
+		
+		if id == 2: # QuickLoad Resource
 			active_cell_item = item
 			active_cell_column = column
 			_open_resource_picker_for_column(column)
-		elif id == 3: 
-			var row_id: StringName = item.get_metadata(0)
-			var prop_idx: int = column - 3
-			var prop_name: StringName = current_schema_properties[prop_idx]["name"]
-			var row_instance: DataStructure = active_table.get_row(row_id)
 			
+		elif id == 3: # Clear Resource
+			var row_instance: DataStructure = active_table.get_row(row_id)
 			if row_instance.get(prop_name) != null:
 				row_instance.set(prop_name, null)
 				active_table.emit_changed()
 				_mark_row_dirty(row_id)
 				refresh_current_table_view()
+				
+		elif id == 4: # Edit Vector Context Menu
+			active_cell_item = item
+			active_cell_column = column
+			var val: Variant = active_table.get_row(row_id).get(prop_name)
+			
+			if prop["type"] == TYPE_VECTOR2:
+				if val == null: val = Vector2.ZERO
+				vector_x_spin.value = val.x
+				vector_y_spin.value = val.y
+				vector_z_spin.get_parent().hide()
+				vector_edit_dialog.title = "Edit Vector2"
+			elif prop["type"] == TYPE_VECTOR3:
+				if val == null: val = Vector3.ZERO
+				vector_x_spin.value = val.x
+				vector_y_spin.value = val.y
+				vector_z_spin.value = val.z
+				vector_z_spin.get_parent().show()
+				vector_edit_dialog.title = "Edit Vector3"
+				
+			vector_edit_dialog.popup_centered()
+			
+		elif id == 5: # Edit Color Context Menu
+			active_cell_item = item
+			active_cell_column = column
+			var val: Variant = active_table.get_row(row_id).get(prop_name)
+			
+			if val == null: val = Color.BLACK
+			color_picker.color = val
+			color_edit_dialog.popup_centered()
 
 
 ## Fires whenever a user hits enter or clicks away from an editable spreadsheet cell.
@@ -739,6 +844,46 @@ func _on_resource_file_selected(path: String) -> void:
 		
 		if row_instance.get(prop_name) == loaded_res: return
 		row_instance.set(prop_name, loaded_res)
+		active_table.emit_changed()
+		_mark_row_dirty(row_id)
+		refresh_current_table_view()
+
+
+## Executes writing the Vector modifications back to the resource safely.
+func _on_vector_edit_confirmed() -> void:
+	if not is_instance_valid(active_cell_item): return
+	var row_id: StringName = active_cell_item.get_metadata(0)
+	var prop_idx: int = active_cell_column - 3
+	var prop: Dictionary = current_schema_properties[prop_idx]
+	var prop_name: StringName = prop["name"]
+	var row_instance: DataStructure = active_table.get_row(row_id)
+	
+	var new_val: Variant
+	if prop["type"] == TYPE_VECTOR2:
+		new_val = Vector2(vector_x_spin.value, vector_y_spin.value)
+	else:
+		new_val = Vector3(vector_x_spin.value, vector_y_spin.value, vector_z_spin.value)
+		
+	if row_instance.get(prop_name) != new_val:
+		row_instance.set(prop_name, new_val)
+		active_table.emit_changed()
+		_mark_row_dirty(row_id)
+		refresh_current_table_view()
+
+
+## Executes writing the new Color back to the resource safely.
+func _on_color_edit_confirmed() -> void:
+	if not is_instance_valid(active_cell_item): return
+	var row_id: StringName = active_cell_item.get_metadata(0)
+	var prop_idx: int = active_cell_column - 3
+	var prop: Dictionary = current_schema_properties[prop_idx]
+	var prop_name: StringName = prop["name"]
+	var row_instance: DataStructure = active_table.get_row(row_id)
+	
+	var new_val: Color = color_picker.color
+	
+	if row_instance.get(prop_name) != new_val:
+		row_instance.set(prop_name, new_val)
 		active_table.emit_changed()
 		_mark_row_dirty(row_id)
 		refresh_current_table_view()

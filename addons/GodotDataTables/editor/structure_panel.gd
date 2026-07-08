@@ -34,6 +34,7 @@ var property_rows: Array[HBoxContainer] = []
 var active_row_for_deletion: HBoxContainer = null
 var active_row_for_duplication: HBoxContainer = null
 var active_dropdown_for_custom: OptionButton = null
+var active_default_container: HBoxContainer = null
 var current_search_mode: SearchMode = SearchMode.CUSTOM
 
 ## Tracks if the UI has unsaved modifications pending a compile.
@@ -44,6 +45,7 @@ var is_dirty: bool = false
 #region Dynamic UI Elements
 var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
+var close_schema_confirm: ConfirmationDialog
 var success_dialog: AcceptDialog
 var script_open_warning: AcceptDialog
 var validation_dialog: AcceptDialog
@@ -55,6 +57,7 @@ var class_list: ItemList
 @onready var fields_container: VBoxContainer = %FieldsContainer
 @onready var btn_new_schema: Button = %BtnNewSchema
 @onready var btn_load_schema: Button = %BtnLoadSchema
+@onready var btn_close_schema: Button = %BtnCloseSchema
 @onready var btn_add_field: Button = %BtnAddField
 @onready var btn_compile: Button = %BtnCompile
 #endregion
@@ -70,16 +73,19 @@ func _ready() -> void:
 	# Apply Native Editor Icons & Tooltips
 	btn_new_schema.icon = _get_safe_theme_icon("New")
 	btn_load_schema.icon = _get_safe_theme_icon("Load")
+	btn_close_schema.icon = _get_safe_theme_icon("Close")
 	btn_add_field.icon = _get_safe_theme_icon("Add")
 	btn_compile.icon = _get_safe_theme_icon("Script")
 	
 	btn_new_schema.tooltip_text = "Create a new DataStructure schema."
 	btn_load_schema.tooltip_text = "Load an existing DataStructure schema from disk."
+	btn_close_schema.tooltip_text = "Close the active schema workspace."
 	btn_add_field.tooltip_text = "Add a new property field to the active schema."
 	btn_compile.tooltip_text = "Compile and save the schema to a strongly-typed .gd script."
 	
 	btn_new_schema.pressed.connect(_on_new_schema_pressed)
 	btn_load_schema.pressed.connect(_on_load_schema_pressed)
+	btn_close_schema.pressed.connect(_on_close_schema_pressed)
 	btn_add_field.pressed.connect(func(): add_blank_property_row())
 	btn_compile.pressed.connect(_on_compile_pressed)
 	
@@ -97,6 +103,11 @@ func _initialize_dynamic_dialogs() -> void:
 	duplicate_confirm.dialog_text = "Duplicate this property?"
 	duplicate_confirm.confirmed.connect(_execute_row_duplication)
 	add_child(duplicate_confirm)
+	
+	close_schema_confirm = ConfirmationDialog.new()
+	close_schema_confirm.dialog_text = "You have unsaved changes. Are you sure you want to close this schema without compiling?"
+	close_schema_confirm.confirmed.connect(_execute_close_schema)
+	add_child(close_schema_confirm)
 	
 	success_dialog = AcceptDialog.new()
 	success_dialog.title = "Success"
@@ -154,6 +165,7 @@ func _update_ui_state() -> void:
 	var baseline_active := not active_script_path.is_empty()
 	btn_add_field.disabled = not baseline_active
 	btn_compile.disabled = not baseline_active
+	btn_close_schema.disabled = not baseline_active
 	
 	if baseline_active:
 		if is_dirty:
@@ -170,14 +182,14 @@ func _update_ui_state() -> void:
 
 #region Row Management & Manipulation
 ## Appends an interactive field mapping row to the schema builder interface.
-func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String") -> void:
+func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null) -> void:
 	var row := HBoxContainer.new()
 	var is_core_identifier: bool = (prop_name == "row_id")
 	
 	if is_core_identifier:
 		row.tooltip_text = "Default row key identifier. Cannot be modified or moved."
 		
-	# 1. Property Name Input
+	# 0. Property Name Input
 	var name_edit := LineEdit.new()
 	name_edit.placeholder_text = "property_name"
 	name_edit.text = prop_name
@@ -192,7 +204,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		
 	row.add_child(name_edit)
 	
-	# 2. Property Type Dropdown Selector
+	# 1. Property Type Dropdown Selector
 	var type_dropdown := OptionButton.new()
 	type_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
@@ -214,10 +226,31 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	if found_idx != -1:
 		type_dropdown.selected = found_idx
 	else:
-		type_dropdown.add_icon_item(_get_safe_theme_icon(prop_type_string), prop_type_string)
+		var fallback_icon = _get_safe_theme_icon(prop_type_string)
+		if prop_type_string not in EXTRA_VARIANTS and not ClassDB.class_exists(prop_type_string):
+			# Assume it's a custom script, attempt to find its custom icon if registered
+			var global_classes := ProjectSettings.get_global_class_list()
+			for cls in global_classes:
+				if cls["class"] == prop_type_string and not cls.get("icon", "").is_empty():
+					if ResourceLoader.exists(cls["icon"]):
+						fallback_icon = load(cls["icon"]) as Texture2D
+					break
+		type_dropdown.add_icon_item(fallback_icon, prop_type_string)
 		var new_idx := type_dropdown.item_count - 1
 		type_dropdown.selected = new_idx
 		
+	# 2. VSeparator
+	var v_sep1 := VSeparator.new()
+	
+	# 3. Context-Aware Default Value Container
+	var default_container := HBoxContainer.new()
+	default_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	default_container.set_meta("is_core_identifier", is_core_identifier)
+	
+	# Initial UI Build for Defaults
+	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val)
+	
+	# Hook the dropdown to refresh the default UI context
 	type_dropdown.item_selected.connect(func(idx: int):
 		_mark_dirty()
 		if idx == native_idx:
@@ -234,24 +267,39 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 			class_search.text = ""
 			_populate_class_list()
 			class_picker.popup_centered()
+		else:
+			# If a standard type is selected, rebuild the default UI immediately
+			var new_type = type_dropdown.get_item_text(idx)
+			_rebuild_default_value_ui(default_container, new_type, null)
 	)
-	row.add_child(type_dropdown)
 	
-	# 3. Move Up Action Button
+	row.add_child(type_dropdown)
+	row.add_child(v_sep1)
+	row.add_child(default_container)
+	
+	# 4. VSeparator
+	var v_sep2 := VSeparator.new()
+	row.add_child(v_sep2)
+	
+	# 5. Move Up Action Button
 	var up_btn := Button.new()
 	up_btn.icon = _get_safe_theme_icon("MoveUp")
 	up_btn.tooltip_text = "Move Property Up"
 	up_btn.pressed.connect(func(): _move_row_up(row))
 	row.add_child(up_btn)
 	
-	# 4. Move Down Action Button
+	# 6. Move Down Action Button
 	var down_btn := Button.new()
 	down_btn.icon = _get_safe_theme_icon("MoveDown")
 	down_btn.tooltip_text = "Move Property Down"
 	down_btn.pressed.connect(func(): _move_row_down(row))
 	row.add_child(down_btn)
 	
-	# 5. Duplicate Action Button
+	# 7. VSeparator
+	var v_sep3 := VSeparator.new()
+	row.add_child(v_sep3)
+	
+	# 8. Duplicate Action Button
 	var duplicate_btn := Button.new()
 	duplicate_btn.icon = _get_safe_theme_icon("ActionCopy")
 	if is_core_identifier:
@@ -264,7 +312,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		)
 	row.add_child(duplicate_btn)
 	
-	# 6. Row Removal Action Button
+	# 9. Row Removal Action Button
 	var delete_btn := Button.new()
 	delete_btn.icon = _get_safe_theme_icon("Remove")
 	if is_core_identifier:
@@ -317,9 +365,9 @@ func _update_button_states() -> void:
 	for i: int in property_rows.size():
 		var row: HBoxContainer = property_rows[i]
 		
-		# Based on our injection order: Up is child 2, Down is child 3
-		var up_btn := row.get_child(2) as Button
-		var down_btn := row.get_child(3) as Button
+		# Based on our injection order: Up is child 5, Down is child 6
+		var up_btn := row.get_child(5) as Button
+		var down_btn := row.get_child(6) as Button
 		
 		if i == 0:
 			up_btn.disabled = true
@@ -344,12 +392,17 @@ func _execute_row_duplication() -> void:
 	if is_instance_valid(active_row_for_duplication):
 		var name_edit := active_row_for_duplication.get_child(0) as LineEdit
 		var type_drop := active_row_for_duplication.get_child(1) as OptionButton
+		var default_container := active_row_for_duplication.get_child(3) as HBoxContainer
 		
 		var original_name: String = name_edit.text
 		var new_name: String = _get_unique_property_name(original_name)
 		var type_string: String = type_drop.get_item_text(type_drop.selected)
 		
-		add_blank_property_row(new_name, type_string)
+		var current_default: Variant = null
+		if default_container.has_meta("default_val"):
+			current_default = default_container.get_meta("default_val")
+		
+		add_blank_property_row(new_name, type_string, current_default)
 		active_row_for_duplication = null
 
 
@@ -443,6 +496,13 @@ func _on_custom_class_selected() -> void:
 	active_dropdown_for_custom.add_icon_item(chosen_tex, chosen_class)
 	var new_idx := active_dropdown_for_custom.item_count - 1
 	active_dropdown_for_custom.selected = new_idx
+	
+	# Fetch the row container and rebuild the default UI for the newly selected class
+	var row = active_dropdown_for_custom.get_parent() as HBoxContainer
+	if row:
+		var default_container = row.get_child(3) as HBoxContainer
+		_rebuild_default_value_ui(default_container, chosen_class, null)
+		
 	active_dropdown_for_custom = null
 	_mark_dirty()
 
@@ -451,6 +511,13 @@ func _on_custom_class_selected() -> void:
 func _on_class_picker_canceled() -> void:
 	if is_instance_valid(active_dropdown_for_custom):
 		active_dropdown_for_custom.selected = BASE_TYPES.find("String")
+		
+		# Revert default container back to string
+		var row = active_dropdown_for_custom.get_parent() as HBoxContainer
+		if row:
+			var default_container = row.get_child(3) as HBoxContainer
+			_rebuild_default_value_ui(default_container, "String", null)
+			
 		active_dropdown_for_custom = null
 		_mark_dirty()
 
@@ -484,10 +551,244 @@ func _validate_real_time(edit: LineEdit) -> void:
 	if duplicate_count > 1:
 		_show_validation_error("Duplicate property name found: '" + raw_name + "'.\nProperty names must be completely unique.")
 		edit.text = ""
+
+
+## Dynamically injects context-specific Input UI for Default Values based on the property type.
+func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant) -> void:
+	for child in container.get_children():
+		child.queue_free()
+		
+	if container.get_meta("is_core_identifier", false):
+		var lbl := Label.new()
+		lbl.text = " Managed Internally"
+		lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+		container.add_child(lbl)
+		return
+		
+	# Safe metadata assignment lambda (prevents setting meta to null which deletes it)
+	var set_safe_meta = func(val: Variant):
+		if val != null:
+			container.set_meta("default_val", val)
+		elif container.has_meta("default_val"):
+			container.remove_meta("default_val")
+			
+	if type_str == "bool":
+		var actual_val: bool = initial_val if typeof(initial_val) == TYPE_BOOL else false
+		set_safe_meta.call(actual_val)
+		
+		var cb := CheckBox.new()
+		cb.text = "True"
+		cb.button_pressed = actual_val
+		cb.toggled.connect(func(t: bool): set_safe_meta.call(t); _mark_dirty())
+		container.add_child(cb)
+		
+	elif type_str == "int" or type_str == "float":
+		var is_int: bool = (type_str == "int")
+		var actual_val: float = initial_val if (typeof(initial_val) == TYPE_INT or typeof(initial_val) == TYPE_FLOAT) else 0.0
+		set_safe_meta.call(int(actual_val) if is_int else actual_val)
+		
+		var sb := SpinBox.new()
+		sb.step = 1 if is_int else 0.01
+		sb.allow_greater = true
+		sb.allow_lesser = true
+		sb.value = actual_val
+		sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sb.value_changed.connect(func(v: float): set_safe_meta.call(int(v) if is_int else v); _mark_dirty())
+		container.add_child(sb)
+		
+	elif type_str == "Color":
+		var actual_val: Color = initial_val if typeof(initial_val) == TYPE_COLOR else Color.WHITE
+		set_safe_meta.call(actual_val)
+		
+		var hbox := HBoxContainer.new()
+		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var cp := ColorPickerButton.new()
+		cp.size_flags_horizontal = Control.SIZE_EXPAND_FILL # Distributes layout evenly with sibling LineEdit
+		cp.color = actual_val
+		
+		var hex_edit := LineEdit.new()
+		hex_edit.text = "#" + actual_val.to_html(false)
+		hex_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hex_edit.max_length = 9
+		hex_edit.placeholder_text = "#HEX Color"
+		
+		# Sync ColorPicker -> LineEdit
+		cp.color_changed.connect(func(c: Color): 
+			set_safe_meta.call(c)
+			hex_edit.text = "#" + c.to_html(false)
+			_mark_dirty()
+		)
+		
+		# Sync LineEdit -> ColorPicker (Allowing copy/paste of hex codes)
+		hex_edit.text_submitted.connect(func(t: String):
+			var safe_hex = t.strip_edges()
+			if safe_hex.is_valid_html_color():
+				var new_c = Color(safe_hex)
+				cp.color = new_c
+				set_safe_meta.call(new_c)
+				# Standardize the formatting visually
+				hex_edit.text = "#" + new_c.to_html(false)
+				_mark_dirty()
+			else:
+				# Revert on invalid hex
+				hex_edit.text = "#" + cp.color.to_html(false)
+		)
+		
+		hex_edit.focus_exited.connect(func():
+			hex_edit.emit_signal("text_submitted", hex_edit.text)
+		)
+		
+		hbox.add_child(cp)
+		hbox.add_child(hex_edit)
+		container.add_child(hbox)
+		
+	elif type_str == "String" or type_str == "StringName":
+		var actual_val: String = str(initial_val) if initial_val != null else ""
+		set_safe_meta.call(actual_val)
+		
+		var le := LineEdit.new()
+		le.placeholder_text = "Default string..."
+		le.text = actual_val
+		le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		le.text_changed.connect(func(t: String): set_safe_meta.call(t); _mark_dirty())
+		container.add_child(le)
+		
+	elif type_str == "Vector2":
+		var actual_val: Vector2 = initial_val if typeof(initial_val) == TYPE_VECTOR2 else Vector2.ZERO
+		set_safe_meta.call(actual_val)
+		
+		var hbox := HBoxContainer.new()
+		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var sb_x := SpinBox.new(); sb_x.prefix = "X:"; sb_x.step = 0.01; sb_x.allow_greater = true; sb_x.allow_lesser = true; sb_x.value = actual_val.x; sb_x.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var sb_y := SpinBox.new(); sb_y.prefix = "Y:"; sb_y.step = 0.01; sb_y.allow_greater = true; sb_y.allow_lesser = true; sb_y.value = actual_val.y; sb_y.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var update_vec = func(_v: float):
+			var new_vec := Vector2(sb_x.value, sb_y.value)
+			set_safe_meta.call(new_vec)
+			_mark_dirty()
+			
+		sb_x.value_changed.connect(update_vec)
+		sb_y.value_changed.connect(update_vec)
+		
+		hbox.add_child(sb_x)
+		hbox.add_child(sb_y)
+		container.add_child(hbox)
+		
+	elif type_str == "Vector3":
+		var actual_val: Vector3 = initial_val if typeof(initial_val) == TYPE_VECTOR3 else Vector3.ZERO
+		set_safe_meta.call(actual_val)
+		
+		var hbox := HBoxContainer.new()
+		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var sb_x := SpinBox.new(); sb_x.prefix = "X:"; sb_x.step = 0.01; sb_x.allow_greater = true; sb_x.allow_lesser = true; sb_x.value = actual_val.x; sb_x.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var sb_y := SpinBox.new(); sb_y.prefix = "Y:"; sb_y.step = 0.01; sb_y.allow_greater = true; sb_y.allow_lesser = true; sb_y.value = actual_val.y; sb_y.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var sb_z := SpinBox.new(); sb_z.prefix = "Z:"; sb_z.step = 0.01; sb_z.allow_greater = true; sb_z.allow_lesser = true; sb_z.value = actual_val.z; sb_z.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var update_vec = func(_v: float):
+			var new_vec := Vector3(sb_x.value, sb_y.value, sb_z.value)
+			set_safe_meta.call(new_vec)
+			_mark_dirty()
+			
+		sb_x.value_changed.connect(update_vec)
+		sb_y.value_changed.connect(update_vec)
+		sb_z.value_changed.connect(update_vec)
+		
+		hbox.add_child(sb_x)
+		hbox.add_child(sb_y)
+		hbox.add_child(sb_z)
+		container.add_child(hbox)
+		
+	else: # Resources, PackedScenes, Objects
+		set_safe_meta.call(initial_val)
+		
+		var hbox := HBoxContainer.new()
+		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var path_lbl := LineEdit.new()
+		path_lbl.editable = false
+		path_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		if typeof(initial_val) == TYPE_STRING and not initial_val.is_empty():
+			path_lbl.text = initial_val.get_file()
+		elif typeof(initial_val) == TYPE_OBJECT and initial_val is Resource and not initial_val.resource_path.is_empty():
+			path_lbl.text = initial_val.resource_path.get_file()
+			set_safe_meta.call(initial_val.resource_path)
+		else:
+			path_lbl.text = "<empty>"
+			
+		var load_btn := Button.new()
+		load_btn.icon = _get_safe_theme_icon("LoadQuick")
+		load_btn.tooltip_text = "Assign default resource"
+		load_btn.pressed.connect(func():
+			active_default_container = container
+			_open_resource_picker_for_default(type_str)
+		)
+		
+		var clear_btn := Button.new()
+		clear_btn.icon = _get_safe_theme_icon("Reload")
+		clear_btn.tooltip_text = "Clear default resource"
+		clear_btn.pressed.connect(func():
+			set_safe_meta.call(null)
+			path_lbl.text = "<empty>"
+			_mark_dirty()
+		)
+		
+		hbox.add_child(path_lbl)
+		hbox.add_child(load_btn)
+		hbox.add_child(clear_btn)
+		container.add_child(hbox)
+
+
+## Spawns the Godot QuickOpen dialog to let users find a default asset.
+func _open_resource_picker_for_default(class_type: String) -> void:
+	var base_types := PackedStringArray()
+	if class_type == "Texture2D" or class_type == "Texture":
+		base_types.append("Texture2D")
+	elif class_type == "PackedScene":
+		base_types.append("PackedScene")
+	elif not class_type.is_empty():
+		base_types.append(class_type)
+	else:
+		base_types.append("Resource")
+		
+	EditorInterface.popup_quick_open(_on_default_resource_selected, base_types)
+
+
+## Handles the return signal from the default resource quick-picker.
+func _on_default_resource_selected(path: String) -> void:
+	if path.is_empty() or not is_instance_valid(active_default_container): 
+		return
+		
+	active_default_container.set_meta("default_val", path)
+	var hbox := active_default_container.get_child(0) as HBoxContainer
+	var path_lbl := hbox.get_child(0) as LineEdit
+	path_lbl.text = path.get_file()
+	
+	active_default_container = null
+	_mark_dirty()
 #endregion
 
 
 #region File & Compilation
+## Triggers the closing of the active schema, warning the user if unsaved changes exist.
+func _on_close_schema_pressed() -> void:
+	if is_dirty:
+		close_schema_confirm.popup_centered()
+	else:
+		_execute_close_schema()
+
+
+## Safely unloads the active schema from the workspace and resets the UI.
+func _execute_close_schema() -> void:
+	active_script_path = ""
+	is_dirty = false
+	clear_workspace()
+	_update_ui_state()
+
+
 ## Prompts the editor file browser to construct a pristine script destination.
 func _on_new_schema_pressed() -> void:
 	var dialog := EditorFileDialog.new()
@@ -524,6 +825,9 @@ func _on_load_schema_pressed() -> void:
 		
 		add_blank_property_row("row_id", "StringName")
 		
+		# Instantiating a temporary object allows us to extract default values securely
+		var temp_instance = loaded_script.new()
+		
 		# Read all valid properties from the schema script natively
 		for prop: Dictionary in loaded_script.get_script_property_list():
 			if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
@@ -533,7 +837,9 @@ func _on_load_schema_pressed() -> void:
 				var type_str: String = prop.get("class_name", "")
 				if type_str.is_empty():
 					type_str = _fallback_type_to_string(prop["type"])
-				add_blank_property_row(prop["name"], type_str)
+					
+				var default_val = temp_instance.get(prop["name"])
+				add_blank_property_row(prop["name"], type_str, default_val)
 				
 		is_dirty = false
 		_update_ui_state()
@@ -603,6 +909,7 @@ func _on_compile_pressed() -> void:
 	for row: HBoxContainer in property_rows:
 		var name_edit := row.get_child(0) as LineEdit
 		var type_drop := row.get_child(1) as OptionButton
+		var default_container := row.get_child(3) as HBoxContainer
 		
 		var raw_name := name_edit.text.strip_edges()
 		if raw_name == "row_id":
@@ -614,7 +921,40 @@ func _on_compile_pressed() -> void:
 		if type_string.is_empty() or type_string == "Custom Resource..." or type_string == "All Native Types...":
 			type_string = "Variant"
 			
-		file.store_line("@export var %s: %s" % [raw_name, type_string])
+		# Compile context-aware default values safely
+		var def_val: Variant = null
+		if default_container.has_meta("default_val"):
+			def_val = default_container.get_meta("default_val")
+			
+		var default_string := ""
+		if def_val != null:
+			if type_string == "String":
+				if str(def_val) != "":
+					default_string = " = \"%s\"" % str(def_val).replace("\"", "\\\"")
+			elif type_string == "StringName":
+				if str(def_val) != "":
+					default_string = " = &\"%s\"" % str(def_val).replace("\"", "\\\"")
+			elif type_string == "int" or type_string == "float":
+				default_string = " = %s" % str(def_val)
+			elif type_string == "bool":
+				default_string = " = %s" % str(def_val).to_lower()
+			elif type_string == "Color":
+				default_string = " = Color(%f, %f, %f, %f)" % [def_val.r, def_val.g, def_val.b, def_val.a]
+			elif type_string == "Vector2" or type_string == "Vector3":
+				# Native Godot serialization prevents parsing crashes
+				if typeof(def_val) == TYPE_VECTOR2 or typeof(def_val) == TYPE_VECTOR3:
+					default_string = " = %s" % var_to_str(def_val)
+			else: # Resources/Objects
+				var path := ""
+				if typeof(def_val) == TYPE_STRING:
+					path = def_val
+				elif typeof(def_val) == TYPE_OBJECT and def_val is Resource:
+					path = def_val.resource_path
+					
+				if not path.is_empty():
+					default_string = " = preload(\"%s\")" % path
+		
+		file.store_line("@export var %s: %s%s" % [raw_name, type_string, default_string])
 		
 	file.close()
 	
