@@ -42,6 +42,9 @@ var current_search_mode: SearchMode = SearchMode.CUSTOM
 
 ## Tracks if the UI has unsaved modifications pending a compile.
 var is_dirty: bool = false
+
+## Tracks if the schema editor is currently locked to prevent accidental modifications.
+var is_locked: bool = false
 #endregion
 
 
@@ -49,6 +52,9 @@ var is_dirty: bool = false
 var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
 var close_schema_confirm: ConfirmationDialog
+var compile_confirm: ConfirmationDialog
+var revert_confirm: ConfirmationDialog
+var lock_dirty_warning: AcceptDialog
 var success_dialog: AcceptDialog
 var script_open_warning: AcceptDialog
 var validation_dialog: AcceptDialog
@@ -62,6 +68,8 @@ var class_list: ItemList
 @onready var btn_new_schema: Button = %BtnNewSchema
 @onready var btn_load_schema: Button = %BtnLoadSchema
 @onready var btn_close_schema: Button = %BtnCloseSchema
+@onready var btn_revert: Button = %BtnRevert
+@onready var btn_lock_unlock: Button = %BtnLockUnlock
 @onready var btn_add_field: Button = %BtnAddField
 @onready var btn_compile: Button = %BtnCompile
 #endregion
@@ -78,20 +86,33 @@ func _ready() -> void:
 	btn_new_schema.icon = _get_safe_theme_icon("New")
 	btn_load_schema.icon = _get_safe_theme_icon("Load")
 	btn_close_schema.icon = _get_safe_theme_icon("Close")
+	btn_revert.icon = _get_safe_theme_icon("UndoRedo")
+	btn_lock_unlock.icon = _get_safe_theme_icon("Unlock")
 	btn_add_field.icon = _get_safe_theme_icon("Add")
 	btn_compile.icon = _get_safe_theme_icon("Save")
 	
 	btn_new_schema.tooltip_text = "Create a new DataStructure schema."
 	btn_load_schema.tooltip_text = "Load an existing DataStructure schema from disk."
 	btn_close_schema.tooltip_text = "Close the active schema workspace."
+	btn_revert.tooltip_text = "Revert all unsaved changes and reload the schema from disk."
+	btn_lock_unlock.tooltip_text = "Lock schema to prevent accidental edits."
 	btn_add_field.tooltip_text = "Add a new property field to the active schema."
 	btn_compile.tooltip_text = "Compile and save the schema to a strongly-typed .gd script."
 	
 	btn_new_schema.pressed.connect(_on_new_schema_pressed)
 	btn_load_schema.pressed.connect(_on_load_schema_pressed)
 	btn_close_schema.pressed.connect(_on_close_schema_pressed)
-	btn_add_field.pressed.connect(func(): add_blank_property_row())
-	btn_compile.pressed.connect(_on_compile_pressed)
+	btn_revert.pressed.connect(func(): revert_confirm.popup_centered())
+	btn_lock_unlock.pressed.connect(_on_lock_unlock_pressed)
+	
+	# Connect add field so the new card instantly highlights yellow to signify unsaved!
+	btn_add_field.pressed.connect(func(): 
+		var card = add_blank_property_row()
+		_mark_row_dirty(card)
+	)
+	
+	# Safe compile routing
+	btn_compile.pressed.connect(func(): compile_confirm.popup_centered())
 	
 	# Enforce breathing room between our property "Cards"
 	fields_container.add_theme_constant_override("separation", 8)
@@ -115,6 +136,23 @@ func _initialize_dynamic_dialogs() -> void:
 	close_schema_confirm.dialog_text = "You have unsaved changes. Are you sure you want to close this schema without compiling?"
 	close_schema_confirm.confirmed.connect(_execute_close_schema)
 	add_child(close_schema_confirm)
+	
+	revert_confirm = ConfirmationDialog.new()
+	revert_confirm.title = "Revert Changes"
+	revert_confirm.dialog_text = "Are you sure you want to revert all unsaved changes?\n\nThis will reload the schema from disk and permanently discard your current modifications."
+	revert_confirm.confirmed.connect(_execute_revert_schema)
+	add_child(revert_confirm)
+	
+	compile_confirm = ConfirmationDialog.new()
+	compile_confirm.title = "Confirm Compile"
+	compile_confirm.dialog_text = "Do you wish to compile and save this schema?\n\nThis will overwrite the existing .gd script on your disk."
+	compile_confirm.confirmed.connect(_on_compile_pressed)
+	add_child(compile_confirm)
+	
+	lock_dirty_warning = AcceptDialog.new()
+	lock_dirty_warning.title = "Cannot Lock Schema"
+	lock_dirty_warning.dialog_text = "You have unsaved changes.\n\nPlease compile and save your schema, or revert changes, before locking the workspace."
+	add_child(lock_dirty_warning)
 	
 	success_dialog = AcceptDialog.new()
 	success_dialog.title = "Success"
@@ -168,13 +206,51 @@ func _mark_dirty() -> void:
 		_update_ui_state()
 
 
+## Highlights a specific property card to visually indicate it has unsaved modifications.
+func _mark_row_dirty(card: PanelContainer) -> void:
+	if not card.has_meta("is_row_dirty"):
+		card.set_meta("is_row_dirty", true)
+		var style: StyleBoxFlat = card.get_theme_stylebox("panel")
+		var warning_color := Color(1.0, 0.8, 0.4, 0.15) # Faint yellow tint
+		style.bg_color = style.bg_color.blend(warning_color)
+		style.border_color = Color(1.0, 0.8, 0.4, 0.5) # Hard yellow border
+		
+	# Ensure the global file is also flagged as unsaved!
+	_mark_dirty()
+
+
+## Wipes the yellow warning highlight from all cards after a successful compile.
+func _clear_all_row_dirty_states() -> void:
+	var base_color: Color = EditorInterface.get_editor_settings().get("interface/theme/base_color") if Engine.is_editor_hint() else Color(0.2, 0.2, 0.2)
+	for card in property_rows:
+		if card.has_meta("is_row_dirty"):
+			card.remove_meta("is_row_dirty")
+			var style: StyleBoxFlat = card.get_theme_stylebox("panel")
+			style.bg_color = base_color.lightened(0.035)
+			style.border_color = Color.BLACK.lightened(0.1)
+
+
 ## Refreshes the top label and toggles main action buttons.
 ## Now supports State-Aware colors: Transparent (None), Hint (Active), Warning (Dirty).
 func _update_ui_state() -> void:
 	var baseline_active := not active_script_path.is_empty()
-	btn_add_field.disabled = not baseline_active
-	btn_compile.disabled = not baseline_active
+	var has_unsaved_changes := baseline_active and is_dirty
+	
+	btn_lock_unlock.disabled = not baseline_active
+	btn_add_field.disabled = not baseline_active or is_locked
 	btn_close_schema.disabled = not baseline_active
+	
+	# Both revert and compile buttons are ONLY active if the table has unsaved changes
+	btn_revert.disabled = not has_unsaved_changes
+	btn_compile.disabled = not has_unsaved_changes
+	
+	# Icon / Tooltip mapping for lock
+	if is_locked:
+		btn_lock_unlock.icon = _get_safe_theme_icon("Lock")
+		btn_lock_unlock.tooltip_text = "Unlock schema for editing."
+	else:
+		btn_lock_unlock.icon = _get_safe_theme_icon("Unlock")
+		btn_lock_unlock.tooltip_text = "Lock schema to prevent accidental edits."
 	
 	# Fetch editor colors dynamically
 	var hint_color: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
@@ -185,18 +261,34 @@ func _update_ui_state() -> void:
 			current_schema_label.text = active_script_path.get_file() + " (Unsaved Changes)"
 			current_schema_label.add_theme_color_override("font_color", warning_color)
 		else:
-			current_schema_label.text = active_script_path.get_file()
+			var locked_text = " [LOCKED]" if is_locked else ""
+			current_schema_label.text = active_script_path.get_file() + locked_text
 			current_schema_label.add_theme_color_override("font_color", hint_color)
 	else:
 		current_schema_label.text = "None Loaded (Create or Load a DataStructure Script)"
 		# Set to transparent gray to indicate "Inactive"
 		current_schema_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.5))
+
+
+## Safely handles toggling the workspace lock state.
+func _on_lock_unlock_pressed() -> void:
+	if not is_locked:
+		if is_dirty:
+			lock_dirty_warning.popup_centered()
+			return
+		is_locked = true
+	else:
+		is_locked = false
+		
+	_update_ui_state()
+	_update_button_states()
+	_set_rows_locked(is_locked)
 #endregion
 
 
 #region Row Management & Manipulation
 ## Appends an interactive field mapping row encapsulated inside a stylish UI "Card".
-func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null) -> void:
+func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null) -> PanelContainer:
 	var is_core_identifier: bool = (prop_name == "row_id")
 	
 	# 1. The Card Enclosure (PanelContainer)
@@ -237,7 +329,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	if is_core_identifier:
 		name_edit.editable = false
 	else:
-		name_edit.text_changed.connect(func(_text: String): _mark_dirty())
+		name_edit.text_changed.connect(func(_text: String): _mark_row_dirty(card))
 		name_edit.focus_exited.connect(func(): _validate_real_time(name_edit))
 		name_edit.text_submitted.connect(func(_text: String): _validate_real_time(name_edit))
 	
@@ -287,10 +379,10 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	default_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	default_container.set_meta("is_core_identifier", is_core_identifier)
 	
-	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val)
+	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val, card)
 	
 	type_dropdown.item_selected.connect(func(idx: int):
-		_mark_dirty()
+		_mark_row_dirty(card)
 		if idx == native_idx:
 			active_dropdown_for_custom = type_dropdown
 			current_search_mode = SearchMode.NATIVE
@@ -307,7 +399,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 			class_picker.popup_centered()
 		else:
 			var new_type = type_dropdown.get_item_text(idx)
-			_rebuild_default_value_ui(default_container, new_type, null)
+			_rebuild_default_value_ui(default_container, new_type, null, card)
 	)
 	
 	row.add_child(type_dropdown)
@@ -365,7 +457,51 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	property_rows.append(card)
 	
 	_update_button_states()
-	_mark_dirty()
+	return card
+
+
+## Iterates through all cards to strictly enforce the Lock/Unlock state dynamically.
+func _set_rows_locked(locked: bool) -> void:
+	for card in property_rows:
+		var row := card.get_child(0).get_child(0) as HBoxContainer
+		var name_edit := row.get_child(0) as LineEdit
+		var type_drop := row.get_child(2) as OptionButton
+		var default_container := row.get_child(4) as HBoxContainer
+		var duplicate_btn := row.get_child(9) as Button
+		var delete_btn := row.get_child(10) as Button
+		
+		var is_core = (name_edit.text == "row_id")
+		
+		if not is_core:
+			name_edit.editable = not locked
+			type_drop.disabled = locked
+			duplicate_btn.disabled = locked
+			delete_btn.disabled = locked
+			
+		_set_default_container_locked(default_container, locked)
+
+
+## Safely strips interaction privileges from dynamically generated default value controls.
+func _set_default_container_locked(container: HBoxContainer, locked: bool) -> void:
+	for child in container.get_children():
+		if child is CheckBox:
+			child.disabled = locked
+		elif child is SpinBox:
+			child.editable = not locked
+		elif child is LineEdit:
+			child.editable = not locked
+		elif child is HBoxContainer:
+			for subchild in child.get_children():
+				if subchild is ColorPickerButton:
+					subchild.disabled = locked
+				elif subchild is LineEdit:
+					if subchild.placeholder_text == "#HEX Color":
+						subchild.editable = not locked
+					# Always keep the Resource string un-editable
+				elif subchild is SpinBox:
+					subchild.editable = not locked
+				elif subchild is Button:
+					subchild.disabled = locked
 
 
 ## Shifts a specific property card up in the visual hierarchy and internal array.
@@ -379,7 +515,7 @@ func _move_row_up(card: PanelContainer) -> void:
 	
 	fields_container.move_child(card, idx - 1)
 	_update_button_states()
-	_mark_dirty()
+	_mark_row_dirty(card)
 
 
 ## Shifts a specific property card down in the visual hierarchy and internal array.
@@ -393,7 +529,7 @@ func _move_row_down(card: PanelContainer) -> void:
 	
 	fields_container.move_child(card, idx + 1)
 	_update_button_states()
-	_mark_dirty()
+	_mark_row_dirty(card)
 
 
 ## Iterates through all rows and safely disables up/down movement on boundary items.
@@ -402,11 +538,14 @@ func _update_button_states() -> void:
 		var card: PanelContainer = property_rows[i]
 		var row := card.get_child(0).get_child(0) as HBoxContainer
 		
-		# Based on our injection order: Up is child 5, Down is child 6
+		# Based on our injection order: Up is child 6, Down is child 7
 		var up_btn := row.get_child(6) as Button
 		var down_btn := row.get_child(7) as Button
 		
-		if i == 0:
+		if is_locked:
+			up_btn.disabled = true
+			down_btn.disabled = true
+		elif i == 0:
 			up_btn.disabled = true
 			down_btn.disabled = true
 		else:
@@ -429,8 +568,8 @@ func _execute_row_duplication() -> void:
 	if is_instance_valid(active_row_for_duplication):
 		var row := active_row_for_duplication.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
-		var type_drop := row.get_child(1) as OptionButton
-		var default_container := row.get_child(3) as HBoxContainer
+		var type_drop := row.get_child(2) as OptionButton
+		var default_container := row.get_child(4) as HBoxContainer
 		
 		var original_name: String = name_edit.text
 		var new_name: String = _get_unique_property_name(original_name)
@@ -440,7 +579,8 @@ func _execute_row_duplication() -> void:
 		if default_container.has_meta("default_val"):
 			current_default = default_container.get_meta("default_val")
 		
-		add_blank_property_row(new_name, type_string, current_default)
+		var new_card = add_blank_property_row(new_name, type_string, current_default)
+		_mark_row_dirty(new_card)
 		active_row_for_duplication = null
 
 
@@ -538,11 +678,12 @@ func _on_custom_class_selected() -> void:
 	
 	var row = active_dropdown_for_custom.get_parent() as HBoxContainer
 	if row:
-		var default_container = row.get_child(3) as HBoxContainer
-		_rebuild_default_value_ui(default_container, chosen_class, null)
+		var default_container = row.get_child(4) as HBoxContainer
+		var card = row.get_parent().get_parent() as PanelContainer
+		_rebuild_default_value_ui(default_container, chosen_class, null, card)
+		_mark_row_dirty(card)
 		
 	active_dropdown_for_custom = null
-	_mark_dirty()
 
 
 ## Called when the user cancels or closes the type selection popup to safely revert the UI.
@@ -552,11 +693,12 @@ func _on_class_picker_canceled() -> void:
 		
 		var row = active_dropdown_for_custom.get_parent() as HBoxContainer
 		if row:
-			var default_container = row.get_child(3) as HBoxContainer
-			_rebuild_default_value_ui(default_container, "String", null)
+			var default_container = row.get_child(4) as HBoxContainer
+			var card = row.get_parent().get_parent() as PanelContainer
+			_rebuild_default_value_ui(default_container, "String", null, card)
+			_mark_row_dirty(card)
 			
 		active_dropdown_for_custom = null
-		_mark_dirty()
 
 
 ## Helper trigger for pre-compilation error prompts.
@@ -592,10 +734,13 @@ func _validate_real_time(edit: LineEdit) -> void:
 
 
 ## Dynamically injects context-specific Input UI for Default Values based on the property type.
-func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant) -> void:
+func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant, card: PanelContainer) -> void:
 	for child in container.get_children():
 		child.queue_free()
 		
+	# Store the parent card so the resource picker popup can flag it!
+	container.set_meta("parent_card", card)
+	
 	if container.get_meta("is_core_identifier", false):
 		var lbl := Label.new()
 		lbl.text = " Managed Internally"
@@ -617,7 +762,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		var cb := CheckBox.new()
 		cb.text = "True"
 		cb.button_pressed = actual_val
-		cb.toggled.connect(func(t: bool): set_safe_meta.call(t); _mark_dirty())
+		cb.toggled.connect(func(t: bool): set_safe_meta.call(t); _mark_row_dirty(card))
 		container.add_child(cb)
 		
 	elif type_str == "int" or type_str == "float":
@@ -631,7 +776,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		sb.allow_lesser = true
 		sb.value = actual_val
 		sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sb.value_changed.connect(func(v: float): set_safe_meta.call(int(v) if is_int else v); _mark_dirty())
+		sb.value_changed.connect(func(v: float): set_safe_meta.call(int(v) if is_int else v); _mark_row_dirty(card))
 		container.add_child(sb)
 		
 	elif type_str == "Color":
@@ -654,7 +799,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		cp.color_changed.connect(func(c: Color): 
 			set_safe_meta.call(c)
 			hex_edit.text = "#" + c.to_html(false)
-			_mark_dirty()
+			_mark_row_dirty(card)
 		)
 		
 		hex_edit.text_submitted.connect(func(t: String):
@@ -664,7 +809,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 				cp.color = new_c
 				set_safe_meta.call(new_c)
 				hex_edit.text = "#" + new_c.to_html(false)
-				_mark_dirty()
+				_mark_row_dirty(card)
 			else:
 				hex_edit.text = "#" + cp.color.to_html(false)
 		)
@@ -685,7 +830,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		le.placeholder_text = "Default string..."
 		le.text = actual_val
 		le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		le.text_changed.connect(func(t: String): set_safe_meta.call(t); _mark_dirty())
+		le.text_changed.connect(func(t: String): set_safe_meta.call(t); _mark_row_dirty(card))
 		container.add_child(le)
 		
 	elif type_str == "Vector2":
@@ -701,7 +846,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		var update_vec = func(_v: float):
 			var new_vec := Vector2(sb_x.value, sb_y.value)
 			set_safe_meta.call(new_vec)
-			_mark_dirty()
+			_mark_row_dirty(card)
 			
 		sb_x.value_changed.connect(update_vec)
 		sb_y.value_changed.connect(update_vec)
@@ -724,7 +869,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		var update_vec = func(_v: float):
 			var new_vec := Vector3(sb_x.value, sb_y.value, sb_z.value)
 			set_safe_meta.call(new_vec)
-			_mark_dirty()
+			_mark_row_dirty(card)
 			
 		sb_x.value_changed.connect(update_vec)
 		sb_y.value_changed.connect(update_vec)
@@ -767,7 +912,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		clear_btn.pressed.connect(func():
 			set_safe_meta.call(null)
 			path_lbl.text = "<empty>"
-			_mark_dirty()
+			_mark_row_dirty(card)
 		)
 		
 		hbox.add_child(path_lbl)
@@ -801,8 +946,13 @@ func _on_default_resource_selected(path: String) -> void:
 	var path_lbl := hbox.get_child(0) as LineEdit
 	path_lbl.text = path.get_file()
 	
+	if active_default_container.has_meta("parent_card"):
+		var card = active_default_container.get_meta("parent_card")
+		_mark_row_dirty(card)
+	else:
+		_mark_dirty()
+	
 	active_default_container = null
-	_mark_dirty()
 #endregion
 
 
@@ -819,8 +969,17 @@ func _on_close_schema_pressed() -> void:
 func _execute_close_schema() -> void:
 	active_script_path = ""
 	is_dirty = false
+	is_locked = false
 	clear_workspace()
 	_update_ui_state()
+
+
+## Discards all unsaved edits and completely reloads the schema structure from the disk script.
+func _execute_revert_schema() -> void:
+	if active_script_path.is_empty():
+		return
+	is_locked = false
+	_on_load_picker_confirmed(active_script_path)
 
 
 ## Prompts the editor file browser to construct a pristine script destination.
@@ -833,6 +992,7 @@ func _on_new_schema_pressed() -> void:
 	dialog.file_selected.connect(func(path: String):
 		active_script_path = path
 		clear_workspace()
+		is_locked = false
 		add_blank_property_row("row_id", "StringName") 
 		is_dirty = true
 		_update_ui_state()
@@ -866,6 +1026,7 @@ func _on_load_picker_confirmed(path: String) -> void:
 		
 	active_script_path = path
 	clear_workspace()
+	is_locked = false
 	
 	add_blank_property_row("row_id", "StringName")
 	
@@ -951,8 +1112,8 @@ func _on_compile_pressed() -> void:
 	for card: PanelContainer in property_rows:
 		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
-		var type_drop := row.get_child(1) as OptionButton
-		var default_container := row.get_child(3) as HBoxContainer
+		var type_drop := row.get_child(2) as OptionButton
+		var default_container := row.get_child(4) as HBoxContainer
 		
 		var raw_name := name_edit.text.strip_edges()
 		if raw_name == "row_id":
@@ -1005,6 +1166,7 @@ func _on_compile_pressed() -> void:
 	
 	is_dirty = false
 	_update_ui_state()
+	_clear_all_row_dirty_states()
 	
 	success_dialog.dialog_text = "Schema successfully generated and saved to:\n" + active_script_path.get_file()
 	success_dialog.popup_centered()

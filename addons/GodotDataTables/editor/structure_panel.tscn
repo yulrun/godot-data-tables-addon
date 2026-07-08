@@ -61,7 +61,18 @@ corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 
 [sub_resource type="DPITexture" id="DPITexture_v80ft"]
-_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M6 1a2 2 0 0 0-2 2v7H1v3a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V5h3V3a2 2 0 0 0-2-2z\"/><path fill-opacity=\".2\" d=\"M6 1a2 2 0 0 0-2 2v7H1v3a2 2 0 1 0 4 0V3a1 1 0 0 1 2 0v3h5V5H8V3a2 2 0 0 0-2-2zM2 11h2v2a1 1 0 0 1-2 0z\"/></svg>
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M8 9H1V2l2 2a3.875 5 30 0 1 9 11 3.5 5 10 0 0-6-8z\"/></svg>
+"
+base_scale = 1.75
+saturation = 2.0
+color_map = {
+Color(1, 0.37254903, 0.37254903, 1): Color(1, 0.47, 0.42, 1),
+Color(0.37254903, 1, 0.5921569, 1): Color(0.45, 0.95, 0.5, 1),
+Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
+}
+
+[sub_resource type="DPITexture" id="DPITexture_ck8tg"]
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M3 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4l-3-3h-1v6H3zm1 0v5h3V1zm4 8a1 1 0 0 1 0 4 1 1 0 0 1 0-4z\"/></svg>
 "
 base_scale = 1.75
 saturation = 2.0
@@ -89,6 +100,10 @@ script = ExtResource("1_vgvkb")
 layout_mode = 2
 
 [node name="Toolbar" type="HBoxContainer" parent="VBoxContainer" unique_id=689187046]
+layout_mode = 2
+
+[node name="BtnLockUnlock" type="Button" parent="VBoxContainer/Toolbar" unique_id=605241985]
+unique_name_in_owner = true
 layout_mode = 2
 
 [node name="DetailPanelContainer" type="PanelContainer" parent="VBoxContainer/Toolbar" unique_id=738503496]
@@ -189,12 +204,19 @@ horizontal_alignment = 1
 custom_minimum_size = Vector2(200, 0)
 layout_mode = 2
 
+[node name="BtnRevert" type="Button" parent="VBoxContainer/HeaderToolbar" unique_id=842009547]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Revert all unsaved changes and reload the schema from disk."
+disabled = true
+icon = SubResource("DPITexture_v80ft")
+
 [node name="BtnCompile" type="Button" parent="VBoxContainer/HeaderToolbar" unique_id=633358640]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Compile and save the schema to a strongly-typed .gd script."
 disabled = true
-icon = SubResource("DPITexture_v80ft")
+icon = SubResource("DPITexture_ck8tg")
 
 [node name="HSeparator3" type="HSeparator" parent="VBoxContainer" unique_id=14112044]
 layout_mode = 2
