@@ -30,9 +30,12 @@ const EXTRA_VARIANTS: Array[String] = [
 ]
 
 var active_script_path: String = ""
-var property_rows: Array[HBoxContainer] = []
-var active_row_for_deletion: HBoxContainer = null
-var active_row_for_duplication: HBoxContainer = null
+
+## Tracks the root PanelContainer "Card" for every property injected into the workspace.
+var property_rows: Array[PanelContainer] = []
+var active_row_for_deletion: PanelContainer = null
+var active_row_for_duplication: PanelContainer = null
+
 var active_dropdown_for_custom: OptionButton = null
 var active_default_container: HBoxContainer = null
 var current_search_mode: SearchMode = SearchMode.CUSTOM
@@ -49,6 +52,7 @@ var close_schema_confirm: ConfirmationDialog
 var success_dialog: AcceptDialog
 var script_open_warning: AcceptDialog
 var validation_dialog: AcceptDialog
+
 var class_picker: ConfirmationDialog
 var class_search: LineEdit
 var class_list: ItemList
@@ -89,6 +93,9 @@ func _ready() -> void:
 	btn_add_field.pressed.connect(func(): add_blank_property_row())
 	btn_compile.pressed.connect(_on_compile_pressed)
 	
+	# Enforce breathing room between our property "Cards"
+	fields_container.add_theme_constant_override("separation", 8)
+	
 	_update_ui_state()
 
 
@@ -122,6 +129,7 @@ func _initialize_dynamic_dialogs() -> void:
 	validation_dialog.title = "Validation Error"
 	add_child(validation_dialog)
 	
+	# The Fuzzy Resource/Type Selector 
 	class_picker = ConfirmationDialog.new()
 	class_picker.title = "Select Resource Type"
 	class_picker.size = Vector2(400, 500)
@@ -181,15 +189,32 @@ func _update_ui_state() -> void:
 
 
 #region Row Management & Manipulation
-## Appends an interactive field mapping row to the schema builder interface.
+## Appends an interactive field mapping row encapsulated inside a stylish UI "Card".
 func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null) -> void:
-	var row := HBoxContainer.new()
 	var is_core_identifier: bool = (prop_name == "row_id")
 	
+	# 1. The Card Enclosure (PanelContainer)
+	var card := PanelContainer.new()
 	if is_core_identifier:
-		row.tooltip_text = "Default row key identifier. Cannot be modified or moved."
+		card.tooltip_text = "Default row key identifier. Cannot be modified or moved."
 		
-	# 0. Property Name Input
+	var base_color: Color = EditorInterface.get_editor_settings().get("interface/theme/base_color") if Engine.is_editor_hint() else Color(0.2, 0.2, 0.2)
+	var style := StyleBoxFlat.new()
+	style.bg_color = base_color.lightened(0.05)
+	style.set_corner_radius_all(4)
+	card.add_theme_stylebox_override("panel", style)
+	
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	card.add_child(margin)
+	
+	var row := HBoxContainer.new()
+	margin.add_child(row)
+		
+	# 2. Property Name Input
 	var name_edit := LineEdit.new()
 	name_edit.placeholder_text = "property_name"
 	name_edit.text = prop_name
@@ -204,7 +229,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		
 	row.add_child(name_edit)
 	
-	# 1. Property Type Dropdown Selector
+	# 3. Property Type Dropdown Selector
 	var type_dropdown := OptionButton.new()
 	type_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
@@ -228,7 +253,6 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	else:
 		var fallback_icon = _get_safe_theme_icon(prop_type_string)
 		if prop_type_string not in EXTRA_VARIANTS and not ClassDB.class_exists(prop_type_string):
-			# Assume it's a custom script, attempt to find its custom icon if registered
 			var global_classes := ProjectSettings.get_global_class_list()
 			for cls in global_classes:
 				if cls["class"] == prop_type_string and not cls.get("icon", "").is_empty():
@@ -239,18 +263,15 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		var new_idx := type_dropdown.item_count - 1
 		type_dropdown.selected = new_idx
 		
-	# 2. VSeparator
 	var v_sep1 := VSeparator.new()
 	
-	# 3. Context-Aware Default Value Container
+	# 4. Context-Aware Default Value Container
 	var default_container := HBoxContainer.new()
 	default_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	default_container.set_meta("is_core_identifier", is_core_identifier)
 	
-	# Initial UI Build for Defaults
 	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val)
 	
-	# Hook the dropdown to refresh the default UI context
 	type_dropdown.item_selected.connect(func(idx: int):
 		_mark_dirty()
 		if idx == native_idx:
@@ -268,7 +289,6 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 			_populate_class_list()
 			class_picker.popup_centered()
 		else:
-			# If a standard type is selected, rebuild the default UI immediately
 			var new_type = type_dropdown.get_item_text(idx)
 			_rebuild_default_value_ui(default_container, new_type, null)
 	)
@@ -277,7 +297,6 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	row.add_child(v_sep1)
 	row.add_child(default_container)
 	
-	# 4. VSeparator
 	var v_sep2 := VSeparator.new()
 	row.add_child(v_sep2)
 	
@@ -285,21 +304,20 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	var up_btn := Button.new()
 	up_btn.icon = _get_safe_theme_icon("MoveUp")
 	up_btn.tooltip_text = "Move Property Up"
-	up_btn.pressed.connect(func(): _move_row_up(row))
+	up_btn.pressed.connect(func(): _move_row_up(card))
 	row.add_child(up_btn)
 	
 	# 6. Move Down Action Button
 	var down_btn := Button.new()
 	down_btn.icon = _get_safe_theme_icon("MoveDown")
 	down_btn.tooltip_text = "Move Property Down"
-	down_btn.pressed.connect(func(): _move_row_down(row))
+	down_btn.pressed.connect(func(): _move_row_down(card))
 	row.add_child(down_btn)
 	
-	# 7. VSeparator
 	var v_sep3 := VSeparator.new()
 	row.add_child(v_sep3)
 	
-	# 8. Duplicate Action Button
+	# 7. Duplicate Action Button
 	var duplicate_btn := Button.new()
 	duplicate_btn.icon = _get_safe_theme_icon("ActionCopy")
 	if is_core_identifier:
@@ -307,12 +325,12 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	else:
 		duplicate_btn.tooltip_text = "Duplicate Property"
 		duplicate_btn.pressed.connect(func():
-			active_row_for_duplication = row
+			active_row_for_duplication = card
 			duplicate_confirm.popup_centered()
 		)
 	row.add_child(duplicate_btn)
 	
-	# 9. Row Removal Action Button
+	# 8. Row Removal Action Button
 	var delete_btn := Button.new()
 	delete_btn.icon = _get_safe_theme_icon("Remove")
 	if is_core_identifier:
@@ -320,42 +338,43 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	else:
 		delete_btn.tooltip_text = "Remove Property"
 		delete_btn.pressed.connect(func():
-			active_row_for_deletion = row
+			active_row_for_deletion = card
 			delete_confirm.popup_centered()
 		)
 	row.add_child(delete_btn)
 	
-	fields_container.add_child(row)
-	property_rows.append(row)
+	# Append the Card wrapper, not just the row!
+	fields_container.add_child(card)
+	property_rows.append(card)
 	
 	_update_button_states()
 	_mark_dirty()
 
 
-## Shifts a specific property row up in the visual hierarchy and internal array.
-func _move_row_up(row: HBoxContainer) -> void:
-	var idx: int = property_rows.find(row)
-	if idx <= 1: return # Cannot move row_id (0) or the row immediately below it (1) up
+## Shifts a specific property card up in the visual hierarchy and internal array.
+func _move_row_up(card: PanelContainer) -> void:
+	var idx: int = property_rows.find(card)
+	if idx <= 1: return 
 	
-	var swap_row: HBoxContainer = property_rows[idx - 1]
-	property_rows[idx] = swap_row
-	property_rows[idx - 1] = row
+	var swap_card: PanelContainer = property_rows[idx - 1]
+	property_rows[idx] = swap_card
+	property_rows[idx - 1] = card
 	
-	fields_container.move_child(row, idx - 1)
+	fields_container.move_child(card, idx - 1)
 	_update_button_states()
 	_mark_dirty()
 
 
-## Shifts a specific property row down in the visual hierarchy and internal array.
-func _move_row_down(row: HBoxContainer) -> void:
-	var idx: int = property_rows.find(row)
-	if idx <= 0 or idx >= property_rows.size() - 1: return # Cannot move row_id (0) or the last row down
+## Shifts a specific property card down in the visual hierarchy and internal array.
+func _move_row_down(card: PanelContainer) -> void:
+	var idx: int = property_rows.find(card)
+	if idx <= 0 or idx >= property_rows.size() - 1: return 
 	
-	var swap_row: HBoxContainer = property_rows[idx + 1]
-	property_rows[idx] = swap_row
-	property_rows[idx + 1] = row
+	var swap_card: PanelContainer = property_rows[idx + 1]
+	property_rows[idx] = swap_card
+	property_rows[idx + 1] = card
 	
-	fields_container.move_child(row, idx + 1)
+	fields_container.move_child(card, idx + 1)
 	_update_button_states()
 	_mark_dirty()
 
@@ -363,7 +382,8 @@ func _move_row_down(row: HBoxContainer) -> void:
 ## Iterates through all rows and safely disables up/down movement on boundary items.
 func _update_button_states() -> void:
 	for i: int in property_rows.size():
-		var row: HBoxContainer = property_rows[i]
+		var card: PanelContainer = property_rows[i]
+		var row := card.get_child(0).get_child(0) as HBoxContainer
 		
 		# Based on our injection order: Up is child 5, Down is child 6
 		var up_btn := row.get_child(5) as Button
@@ -377,7 +397,7 @@ func _update_button_states() -> void:
 			down_btn.disabled = (i == property_rows.size() - 1) # Last row cannot go down
 
 
-## Handles the confirmed deletion of a property row.
+## Handles the confirmed deletion of a property card.
 func _execute_row_deletion() -> void:
 	if is_instance_valid(active_row_for_deletion):
 		property_rows.erase(active_row_for_deletion)
@@ -387,12 +407,13 @@ func _execute_row_deletion() -> void:
 		_mark_dirty()
 
 
-## Handles the confirmed duplication of a property row, auto-incrementing its name.
+## Handles the confirmed duplication of a property card, auto-incrementing its name.
 func _execute_row_duplication() -> void:
 	if is_instance_valid(active_row_for_duplication):
-		var name_edit := active_row_for_duplication.get_child(0) as LineEdit
-		var type_drop := active_row_for_duplication.get_child(1) as OptionButton
-		var default_container := active_row_for_duplication.get_child(3) as HBoxContainer
+		var row := active_row_for_duplication.get_child(0).get_child(0) as HBoxContainer
+		var name_edit := row.get_child(0) as LineEdit
+		var type_drop := row.get_child(1) as OptionButton
+		var default_container := row.get_child(3) as HBoxContainer
 		
 		var original_name: String = name_edit.text
 		var new_name: String = _get_unique_property_name(original_name)
@@ -409,7 +430,8 @@ func _execute_row_duplication() -> void:
 ## Generates a unique property name by appending or incrementing a trailing number.
 func _get_unique_property_name(base_name: String) -> String:
 	var existing_names: Array[String] = []
-	for row: HBoxContainer in property_rows:
+	for card: PanelContainer in property_rows:
+		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var line_edit := row.get_child(0) as LineEdit
 		existing_names.append(line_edit.text)
 		
@@ -435,9 +457,9 @@ func _get_unique_property_name(base_name: String) -> String:
 
 ## Clears all visual rows from the workspace when loading a new file.
 func clear_workspace() -> void:
-	for row: HBoxContainer in property_rows:
-		if is_instance_valid(row):
-			row.queue_free()
+	for card: PanelContainer in property_rows:
+		if is_instance_valid(card):
+			card.queue_free()
 	property_rows.clear()
 #endregion
 
@@ -497,7 +519,6 @@ func _on_custom_class_selected() -> void:
 	var new_idx := active_dropdown_for_custom.item_count - 1
 	active_dropdown_for_custom.selected = new_idx
 	
-	# Fetch the row container and rebuild the default UI for the newly selected class
 	var row = active_dropdown_for_custom.get_parent() as HBoxContainer
 	if row:
 		var default_container = row.get_child(3) as HBoxContainer
@@ -512,7 +533,6 @@ func _on_class_picker_canceled() -> void:
 	if is_instance_valid(active_dropdown_for_custom):
 		active_dropdown_for_custom.selected = BASE_TYPES.find("String")
 		
-		# Revert default container back to string
 		var row = active_dropdown_for_custom.get_parent() as HBoxContainer
 		if row:
 			var default_container = row.get_child(3) as HBoxContainer
@@ -543,7 +563,8 @@ func _validate_real_time(edit: LineEdit) -> void:
 		return
 		
 	var duplicate_count: int = 0
-	for row: HBoxContainer in property_rows:
+	for card: PanelContainer in property_rows:
+		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var other_edit := row.get_child(0) as LineEdit
 		if other_edit.text.strip_edges() == raw_name:
 			duplicate_count += 1
@@ -604,7 +625,7 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		
 		var cp := ColorPickerButton.new()
-		cp.size_flags_horizontal = Control.SIZE_EXPAND_FILL # Distributes layout evenly with sibling LineEdit
+		cp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cp.color = actual_val
 		
 		var hex_edit := LineEdit.new()
@@ -613,25 +634,21 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		hex_edit.max_length = 9
 		hex_edit.placeholder_text = "#HEX Color"
 		
-		# Sync ColorPicker -> LineEdit
 		cp.color_changed.connect(func(c: Color): 
 			set_safe_meta.call(c)
 			hex_edit.text = "#" + c.to_html(false)
 			_mark_dirty()
 		)
 		
-		# Sync LineEdit -> ColorPicker (Allowing copy/paste of hex codes)
 		hex_edit.text_submitted.connect(func(t: String):
 			var safe_hex = t.strip_edges()
 			if safe_hex.is_valid_html_color():
 				var new_c = Color(safe_hex)
 				cp.color = new_c
 				set_safe_meta.call(new_c)
-				# Standardize the formatting visually
 				hex_edit.text = "#" + new_c.to_html(false)
 				_mark_dirty()
 			else:
-				# Revert on invalid hex
 				hex_edit.text = "#" + cp.color.to_html(false)
 		)
 		
@@ -807,45 +824,52 @@ func _on_new_schema_pressed() -> void:
 	dialog.popup_centered_ratio(0.5)
 
 
-## Loads an existing custom DataStructure script and reverse-engineers its property list.
+## Opens Godot's native File Dialog to securely find and load any .gd Schema Script.
 func _on_load_schema_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
 	dialog.add_filter("*.gd", "GDScript File")
 	dialog.current_dir = "res://addons/GodotDataTables/data/data_structures/"
-	
 	dialog.file_selected.connect(func(path: String):
-		var loaded_script := load(path) as Script
-		if not loaded_script or not loaded_script.can_instantiate():
-			printerr("GodotDataTables: Selected file is not a valid instantiable script.")
-			return
-			
-		active_script_path = path
-		clear_workspace()
-		
-		add_blank_property_row("row_id", "StringName")
-		
-		# Instantiating a temporary object allows us to extract default values securely
-		var temp_instance = loaded_script.new()
-		
-		# Read all valid properties from the schema script natively
-		for prop: Dictionary in loaded_script.get_script_property_list():
-			if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
-				if prop["name"] == "row_id":
-					continue
-					
-				var type_str: String = prop.get("class_name", "")
-				if type_str.is_empty():
-					type_str = _fallback_type_to_string(prop["type"])
-					
-				var default_val = temp_instance.get(prop["name"])
-				add_blank_property_row(prop["name"], type_str, default_val)
-				
-		is_dirty = false
-		_update_ui_state()
+		_on_load_picker_confirmed(path)
 	)
 	add_child(dialog)
 	dialog.popup_centered_ratio(0.5)
+
+
+## Extracts the selected script from the native loader and rebuilds the UI structure.
+func _on_load_picker_confirmed(path: String) -> void:
+	if path.is_empty(): return
+	
+	var loaded_script := load(path) as Script
+	
+	if not loaded_script or not loaded_script.can_instantiate():
+		printerr("GodotDataTables: Selected file is not a valid instantiable script.")
+		return
+		
+	active_script_path = path
+	clear_workspace()
+	
+	add_blank_property_row("row_id", "StringName")
+	
+	# Instantiating a temporary object allows us to extract default values securely
+	var temp_instance = loaded_script.new()
+	
+	# Read all valid properties from the schema script natively
+	for prop: Dictionary in loaded_script.get_script_property_list():
+		if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			if prop["name"] == "row_id":
+				continue
+				
+			var type_str: String = prop.get("class_name", "")
+			if type_str.is_empty():
+				type_str = _fallback_type_to_string(prop["type"])
+				
+			var default_val = temp_instance.get(prop["name"])
+			add_blank_property_row(prop["name"], type_str, default_val)
+			
+	is_dirty = false
+	_update_ui_state()
 
 
 ## Compiles layout row matrices into a strongly typed system file via FileAccess.
@@ -865,7 +889,8 @@ func _on_compile_pressed() -> void:
 	var regex := RegEx.new()
 	regex.compile("^[a-zA-Z_][a-zA-Z0-9_]*$")
 	
-	for row: HBoxContainer in property_rows:
+	for card: PanelContainer in property_rows:
+		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
 		var raw_name := name_edit.text.strip_edges()
 		
@@ -906,7 +931,8 @@ func _on_compile_pressed() -> void:
 	file.store_line("class_name " + class_name_suggestion + " extends DataStructure")
 	file.store_line("")
 	
-	for row: HBoxContainer in property_rows:
+	for card: PanelContainer in property_rows:
+		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
 		var type_drop := row.get_child(1) as OptionButton
 		var default_container := row.get_child(3) as HBoxContainer

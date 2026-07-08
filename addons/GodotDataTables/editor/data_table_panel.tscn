@@ -183,6 +183,16 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_colors/guide_color = Color(1, 1, 1, 0.1)
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+theme_override_constants/inner_item_margin_bottom = 4
+theme_override_constants/inner_item_margin_left = 4
+theme_override_constants/inner_item_margin_right = 4
+theme_override_constants/inner_item_margin_top = 4
+theme_override_constants/icon_h_separation = 8
+theme_override_constants/button_margin = 8
+theme_override_constants/draw_guides = 1
 hide_root = true
 select_mode = 1
 

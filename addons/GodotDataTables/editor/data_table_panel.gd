@@ -63,10 +63,6 @@ var clear_confirm: ConfirmationDialog
 var close_confirm: ConfirmationDialog
 var import_conflict_dialog: ConfirmationDialog
 
-var schema_picker: ConfirmationDialog
-var schema_search: LineEdit
-var schema_list: ItemList
-
 var vector_edit_dialog: ConfirmationDialog
 var vector_x_spin: SpinBox
 var vector_y_spin: SpinBox
@@ -100,11 +96,15 @@ func _ready() -> void:
 		
 	_initialize_dynamic_dialogs()
 	
-	# Dynamically match the exact size of the Editor's warning icon to prevent column popping on high-DPI displays.
+	# Dynamically generate an invisible structural pillar for column 0 width locking
 	var warning_tex: Texture2D = _get_safe_theme_icon("NodeWarning")
 	var icon_size: Vector2 = warning_tex.get_size()
 	var empty_img := Image.create_empty(int(icon_size.x), int(icon_size.y), false, Image.FORMAT_RGBA8)
 	empty_icon = ImageTexture.create_from_image(empty_img)
+	
+	# Enable native Godot horizontal guides (grid lines) for clean row separation
+	tree.add_theme_constant_override("draw_guides", 1)
+	tree.add_theme_color_override("guide_color", Color(1.0, 1.0, 1.0, 0.10)) # 10% white lines
 	
 	# Apply Native Editor Icons & Tooltips
 	filter_bar.right_icon = _get_safe_theme_icon("Search")
@@ -187,27 +187,6 @@ func _initialize_dynamic_dialogs() -> void:
 			import_conflict_dialog.hide()
 	)
 	add_child(import_conflict_dialog)
-	
-	schema_picker = ConfirmationDialog.new()
-	schema_picker.title = "Select Schema (DataStructure) for Table"
-	schema_picker.size = Vector2(400, 500)
-	
-	var picker_vbox := VBoxContainer.new()
-	picker_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	schema_picker.add_child(picker_vbox)
-	
-	schema_search = LineEdit.new()
-	schema_search.placeholder_text = "Search schemas..."
-	schema_search.text_changed.connect(_populate_schema_list)
-	picker_vbox.add_child(schema_search)
-	
-	schema_list = ItemList.new()
-	schema_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	schema_list.item_activated.connect(func(idx: int): schema_picker.get_ok_button().emit_signal("pressed"))
-	picker_vbox.add_child(schema_list)
-	
-	schema_picker.confirmed.connect(_on_schema_picker_confirmed)
-	add_child(schema_picker)
 	
 	# Setup Native Popups for Context Editors
 	vector_edit_dialog = ConfirmationDialog.new()
@@ -486,42 +465,30 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		item.add_button(action_col, _get_safe_theme_icon("Remove"), 1, false, "Delete Row")
 
 
-## Sweeps through all visible rows and dynamically applies Zebra striping and dirty state overlays.
+## Sweeps through all visible rows and dynamically applies background color overrides.
 func _update_row_colors() -> void:
 	var root: TreeItem = tree.get_root()
 	if not root: return
 	
-	var base_accent: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
-	var zebra_color: Color = Color(base_accent.r, base_accent.g, base_accent.b, 0.15)
-	var dirty_color_odd: Color = Color(1.0, 0.8, 0.4, 0.20)
-	var dirty_color_even: Color = Color(1.0, 0.8, 0.4, 0.08)
-	var default_color: Color = Color(0, 0, 0, 0) 
+	var dirty_color: Color = Color(1.0, 0.8, 0.4, 0.15) # Clean warning orange glow
+	var default_color: Color = Color(0, 0, 0, 0) # Transparent, relying natively on Godot Tree layout
 	
 	var child: TreeItem = root.get_first_child()
-	var visible_index: int = 0
 	
 	while child:
 		if child.visible:
 			var row_id: StringName = child.get_metadata(0)
 			var is_row_dirty: bool = dirty_rows.has(row_id) and dirty_rows[row_id]
-			var is_odd: bool = (visible_index % 2 == 1)
+			var target_bg: Color = dirty_color if is_row_dirty else default_color
 			
-			var target_bg: Color = default_color
-			if is_row_dirty:
-				target_bg = dirty_color_odd if is_odd else dirty_color_even
-			elif is_odd:
-				target_bg = zebra_color
-				
 			for col: int in tree.columns:
 				child.set_custom_bg_color(col, target_bg)
-				# Ensure 'empty' cells and index columns remain readable
+				# Ensure 'empty' cells and index columns remain readable/dimmed text logic
 				if col == 1 or child.get_text(col) == "<empty>":
 					child.set_custom_color(col, Color(0.6, 0.6, 0.6))
 				else:
 					child.clear_custom_color(col)
 					
-			visible_index += 1
-			
 		child = child.get_next()
 
 
@@ -812,7 +779,7 @@ func _on_cell_edited() -> void:
 			item.set_text(col, var_to_str(new_value))
 
 
-## Uses Godot's powerful Quick Open popup to find contextual resources.
+## Uses Godot's native QuickOpen dialog to securely find Resources matching the column's expected class type.
 func _open_resource_picker_for_column(col: int) -> void:
 	var prop_idx: int = col - 3
 	var prop: Dictionary = current_schema_properties[prop_idx]
@@ -1105,26 +1072,25 @@ func _on_save_pressed() -> void:
 			printerr("GodotDataTables: Failed to save DataTable.")
 
 
-## Launches standard file dialog to load an existing table.
+## Opens Godot's native QuickOpen dialog to select an existing DataTable resource.
 func _on_load_table_pressed() -> void:
-	var dialog := EditorFileDialog.new()
-	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	dialog.add_filter("*.tres", "DataTable Resource")
-	dialog.current_dir = "res://addons/GodotDataTables/data/data_tables/"
-	dialog.file_selected.connect(func(path: String):
-		var loaded_res := load(path)
-		if loaded_res is DataTable:
-			active_table_path = path
-			active_table = loaded_res
-			is_dirty = false
-			dirty_rows.clear()
-			active_sort_column = -1
-			active_sort_direction = 0
-			_update_ui_state()
-			refresh_current_table_view()
-	)
-	add_child(dialog)
-	dialog.popup_centered_ratio(0.5)
+	EditorInterface.popup_quick_open(_on_load_picker_confirmed, PackedStringArray(["DataTable"]))
+
+
+## Loads the selected DataTable from the QuickOpen popup into the workspace.
+func _on_load_picker_confirmed(path: String) -> void:
+	if path.is_empty(): return
+	var loaded_res := load(path)
+	
+	if loaded_res is DataTable:
+		active_table_path = path
+		active_table = loaded_res
+		is_dirty = false
+		dirty_rows.clear()
+		active_sort_column = -1
+		active_sort_direction = 0
+		_update_ui_state()
+		refresh_current_table_view()
 
 
 ## Launches standard file dialog to determine the location to construct a new table.
@@ -1138,42 +1104,15 @@ func _on_new_table_pressed() -> void:
 	save_dialog.popup_centered_ratio(0.5)
 
 
-## Triggers the Schema Selection popup upon picking a new table save location.
+## Triggers the Godot Native QuickOpen popup to bind a DataStructure schema to the new table.
 func _on_new_table_path_selected(path: String) -> void:
 	pending_new_table_path = path
-	schema_search.text = ""
-	_populate_schema_list()
-	schema_picker.popup_centered()
+	EditorInterface.popup_quick_open(_on_schema_picker_confirmed, PackedStringArray(["DataStructure"]))
 
 
-## Populates the searchable ItemList with all custom DataStructure schemas.
-func _populate_schema_list(filter: String = "") -> void:
-	schema_list.clear()
-	var filter_lower := filter.to_lower()
-	var global_classes: Array[Dictionary] = ProjectSettings.get_global_class_list()
-	
-	for cls: Dictionary in global_classes:
-		var cls_name: String = cls["class"]
-		var cls_base: String = cls["base"]
-		var cls_icon_path: String = cls.get("icon", "")
-		
-		if cls_base == "DataStructure":
-			if filter_lower.is_empty() or filter_lower in cls_name.to_lower():
-				var tex: Texture2D = null
-				if not cls_icon_path.is_empty() and ResourceLoader.exists(cls_icon_path):
-					tex = load(cls_icon_path) as Texture2D
-				if not tex:
-					tex = _get_safe_theme_icon("Script")
-				var item_idx := schema_list.add_item(cls_name, tex)
-				schema_list.set_item_metadata(item_idx, cls["path"])
-
-
-## Completes table creation when the user picks a DataStructure schema from the popup.
-func _on_schema_picker_confirmed() -> void:
-	var selected_items: PackedInt32Array = schema_list.get_selected_items()
-	if selected_items.is_empty(): return
-		
-	var schema_path: String = schema_list.get_item_metadata(selected_items[0])
+## Completes table creation when the user picks a DataStructure schema from the QuickOpen popup.
+func _on_schema_picker_confirmed(schema_path: String) -> void:
+	if schema_path.is_empty(): return
 	var schema_script: GDScript = load(schema_path) as GDScript
 	
 	if not schema_script or not schema_script.can_instantiate():
