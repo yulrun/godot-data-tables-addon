@@ -275,7 +275,7 @@ func _update_ui_state() -> void:
 		if not is_instance_valid(active_table.row_schema):
 			current_table_label.text += " (WARNING: No Schema Assigned)"
 	else:
-		current_table_label.text = "None Loaded"
+		current_table_label.text = "None Loaded (Create or Load a DataTable Resource)"
 		# Set to transparent gray to indicate "Inactive"
 		current_table_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.5))
 		filter_bar.text = ""

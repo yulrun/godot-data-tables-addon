@@ -168,23 +168,29 @@ func _mark_dirty() -> void:
 		_update_ui_state()
 
 
-## Refreshes the top label and toggles main action buttons based on whether a script is loaded.
+## Refreshes the top label and toggles main action buttons.
+## Now supports State-Aware colors: Transparent (None), Hint (Active), Warning (Dirty).
 func _update_ui_state() -> void:
 	var baseline_active := not active_script_path.is_empty()
 	btn_add_field.disabled = not baseline_active
 	btn_compile.disabled = not baseline_active
 	btn_close_schema.disabled = not baseline_active
 	
+	# Fetch editor colors dynamically
+	var hint_color: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
+	var warning_color: Color = Color(1.0, 0.8, 0.4)
+	
 	if baseline_active:
 		if is_dirty:
 			current_schema_label.text = active_script_path.get_file() + " (Unsaved Changes)"
-			current_schema_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
+			current_schema_label.add_theme_color_override("font_color", warning_color)
 		else:
 			current_schema_label.text = active_script_path.get_file()
-			current_schema_label.remove_theme_color_override("font_color")
+			current_schema_label.add_theme_color_override("font_color", hint_color)
 	else:
-		current_schema_label.text = "None Loaded (Create or Load a Schema Script)"
-		current_schema_label.remove_theme_color_override("font_color")
+		current_schema_label.text = "None Loaded (Create or Load a DataStructure Script)"
+		# Set to transparent gray to indicate "Inactive"
+		current_schema_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.5))
 #endregion
 
 
