@@ -27,14 +27,18 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 current_tab = 0
+tab_0/title = "Structure"
+tab_1/title = "DataTable"
 
 [node name="StructurePanel" parent="VBoxContainer/TabContainer" unique_id=682471999 instance=ExtResource("2_104kd")]
 unique_name_in_owner = true
 layout_mode = 2
 metadata/_tab_index = 0
+metadata/_tab_name = "Structure"
 
 [node name="DataTablePanel" parent="VBoxContainer/TabContainer" unique_id=1239353791 instance=ExtResource("3_v5usa")]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 metadata/_tab_index = 1
+metadata/_tab_name = "DataTable"

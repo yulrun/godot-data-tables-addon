@@ -2,6 +2,13 @@
 
 [ext_resource type="Script" uid="uid://dgjgb3ovs2h0o" path="res://addons/GodotDataTables/editor/structure_panel.gd" id="1_vgvkb"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_8f6qp"]
+bg_color = Color(0.22352941, 0.22352941, 0.22352941, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
 [sub_resource type="DPITexture" id="DPITexture_vgvkb"]
 _source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M2 1v14h8v-1H8v-4h2V8h4V6H9V1zm8 0v4h4z\"/><path fill=\"#5fff97\" d=\"M11 9v2H9v2h2v2h2v-2h2v-2h-2V9z\"/></svg>
 "
@@ -46,6 +53,13 @@ Color(0.37254903, 1, 0.5921569, 1): Color(0.45, 0.95, 0.5, 1),
 Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
 }
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_vgvkb"]
+bg_color = Color(0.10980392, 0.10980392, 0.10980392, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
 [sub_resource type="DPITexture" id="DPITexture_v80ft"]
 _source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M6 1a2 2 0 0 0-2 2v7H1v3a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V5h3V3a2 2 0 0 0-2-2z\"/><path fill-opacity=\".2\" d=\"M6 1a2 2 0 0 0-2 2v7H1v3a2 2 0 1 0 4 0V3a1 1 0 0 1 2 0v3h5V5H8V3a2 2 0 0 0-2-2zM2 11h2v2a1 1 0 0 1-2 0z\"/></svg>
 "
@@ -74,42 +88,115 @@ script = ExtResource("1_vgvkb")
 [node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=2140830248]
 layout_mode = 2
 
-[node name="ToolBar" type="HBoxContainer" parent="VBoxContainer" unique_id=1714145774]
+[node name="Toolbar" type="HBoxContainer" parent="VBoxContainer" unique_id=689187046]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/ToolBar" unique_id=68389450]
+[node name="DetailPanelContainer" type="PanelContainer" parent="VBoxContainer/Toolbar" unique_id=738503496]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_8f6qp")
+
+[node name="DetailMarginContainer" type="MarginContainer" parent="VBoxContainer/Toolbar/DetailPanelContainer" unique_id=1552203203]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="DetailBar" type="HBoxContainer" parent="VBoxContainer/Toolbar/DetailPanelContainer/DetailMarginContainer" unique_id=1714145774]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/Toolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=68389450]
 layout_mode = 2
 text = "Active Schema:"
 
-[node name="CurrentSchemaLabel" type="Label" parent="VBoxContainer/ToolBar" unique_id=479823508]
+[node name="CurrentSchemaLabel" type="Label" parent="VBoxContainer/Toolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=479823508]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-text = "None Loaded (Create or Load a Schema Script)"
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 0.5)
+text = "None Loaded (Create or Load a DataStructure Script)"
 
-[node name="BtnNewSchema" type="Button" parent="VBoxContainer/ToolBar" unique_id=884086932]
+[node name="IOBar" type="HBoxContainer" parent="VBoxContainer/Toolbar" unique_id=1203686716]
+layout_mode = 2
+
+[node name="BtnNewSchema" type="Button" parent="VBoxContainer/Toolbar/IOBar" unique_id=1618065043]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Create a new DataStructure schema."
-text = "New Schema"
 icon = SubResource("DPITexture_vgvkb")
 
-[node name="BtnLoadSchema" type="Button" parent="VBoxContainer/ToolBar" unique_id=1297400869]
+[node name="BtnLoadSchema" type="Button" parent="VBoxContainer/Toolbar/IOBar" unique_id=1732895900]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Load an existing DataStructure schema from disk."
-text = "Load Schema"
 icon = SubResource("DPITexture_222ur")
 
-[node name="BtnCloseSchema" type="Button" parent="VBoxContainer/ToolBar" unique_id=551686532]
+[node name="BtnCloseSchema" type="Button" parent="VBoxContainer/Toolbar/IOBar" unique_id=397734328]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Close the active schema workspace."
 disabled = true
-text = "Close Schema"
 icon = SubResource("DPITexture_obgt3")
 
 [node name="HSeparator" type="HSeparator" parent="VBoxContainer" unique_id=93633386]
+layout_mode = 2
+
+[node name="HeaderToolbar" type="HBoxContainer" parent="VBoxContainer" unique_id=609584951]
+layout_mode = 2
+
+[node name="BtnAddField" type="Button" parent="VBoxContainer/HeaderToolbar" unique_id=1556842573]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Add a new property field to the active schema."
+disabled = true
+icon = SubResource("DPITexture_gmoj0")
+
+[node name="DetailPanelContainer" type="PanelContainer" parent="VBoxContainer/HeaderToolbar" unique_id=1097156769]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_vgvkb")
+
+[node name="DetailMarginContainer" type="MarginContainer" parent="VBoxContainer/HeaderToolbar/DetailPanelContainer" unique_id=466351080]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="DetailBar" type="HBoxContainer" parent="VBoxContainer/HeaderToolbar/DetailPanelContainer/DetailMarginContainer" unique_id=541054489]
+layout_mode = 2
+
+[node name="Label1" type="Label" parent="VBoxContainer/HeaderToolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=1735133983]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Property Name"
+horizontal_alignment = 1
+
+[node name="Label2" type="Label" parent="VBoxContainer/HeaderToolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=1940794072]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Data Type"
+horizontal_alignment = 1
+
+[node name="Label3" type="Label" parent="VBoxContainer/HeaderToolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=1514829085]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Default Value"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="VBoxContainer/HeaderToolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=1536288889]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+
+[node name="BtnCompile" type="Button" parent="VBoxContainer/HeaderToolbar" unique_id=633358640]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Compile and save the schema to a strongly-typed .gd script."
+disabled = true
+icon = SubResource("DPITexture_v80ft")
+
+[node name="HSeparator3" type="HSeparator" parent="VBoxContainer" unique_id=14112044]
 layout_mode = 2
 
 [node name="MainScroll" type="ScrollContainer" parent="VBoxContainer" unique_id=698683627]
@@ -121,51 +208,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="HeaderRow" type="HBoxContainer" parent="VBoxContainer/MainScroll/VBoxContainer" unique_id=876446977]
-layout_mode = 2
-
-[node name="Label1" type="Label" parent="VBoxContainer/MainScroll/VBoxContainer/HeaderRow" unique_id=1735133983]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Property Name"
-
-[node name="Label2" type="Label" parent="VBoxContainer/MainScroll/VBoxContainer/HeaderRow" unique_id=1940794072]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Data Type"
-
-[node name="Label3" type="Label" parent="VBoxContainer/MainScroll/VBoxContainer/HeaderRow" unique_id=1514829085]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Default Value"
-
-[node name="Spacer" type="Control" parent="VBoxContainer/MainScroll/VBoxContainer/HeaderRow" unique_id=1536288889]
-custom_minimum_size = Vector2(300, 0)
-layout_mode = 2
-
 [node name="FieldsContainer" type="VBoxContainer" parent="VBoxContainer/MainScroll/VBoxContainer" unique_id=807906400]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="HSeparator2" type="HSeparator" parent="VBoxContainer" unique_id=207577779]
 layout_mode = 2
 
 [node name="ActionRow" type="HBoxContainer" parent="VBoxContainer" unique_id=23471470]
 layout_mode = 2
-
-[node name="BtnAddField" type="Button" parent="VBoxContainer/ActionRow" unique_id=1556842573]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Add a new property field to the active schema."
-disabled = true
-text = "Add Property Field"
-icon = SubResource("DPITexture_gmoj0")
-
-[node name="BtnCompile" type="Button" parent="VBoxContainer/ActionRow" unique_id=633358640]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 10
-tooltip_text = "Compile and save the schema to a strongly-typed .gd script."
-disabled = true
-text = "Compile & Generate Script"
-icon = SubResource("DPITexture_v80ft")

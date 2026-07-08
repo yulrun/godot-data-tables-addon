@@ -2,6 +2,13 @@
 
 [ext_resource type="Script" uid="uid://pj5gib4xgyvk" path="res://addons/GodotDataTables/editor/data_table_panel.gd" id="1_rhp01"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_rhp01"]
+bg_color = Color(0.22352941, 0.22352941, 0.22352941, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
 [sub_resource type="DPITexture" id="DPITexture_rhp01"]
 _source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M2 1v14h8v-1H8v-4h2V8h4V6H9V1zm8 0v4h4z\"/><path fill=\"#5fff97\" d=\"M11 9v2H9v2h2v2h2v-2h2v-2h-2V9z\"/></svg>
 "
@@ -25,7 +32,7 @@ Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
 }
 
 [sub_resource type="DPITexture" id="DPITexture_glws4"]
-_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M3 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4l-3-3h-1v6H3zm1 0v5h3V1zm4 8a1 1 0 0 1 0 4 1 1 0 0 1 0-4z\"/></svg>
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"none\" stroke=\"#e0e0e0\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10 2H6m2 4v8M4 9l4 5 4-5\"/></svg>
 "
 base_scale = 1.75
 saturation = 2.0
@@ -36,7 +43,7 @@ Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
 }
 
 [sub_resource type="DPITexture" id="DPITexture_u5ua0"]
-_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M10.168 8.754a5 5 0 1 0-1.414 1.414l4.316 4.316 1.414-1.414zM6 3a3 3 0 0 1 0 6 3 3 0 0 1 0-6z\"/></svg>
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"none\" stroke=\"#e0e0e0\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 14h4m-2-4V2m4 5L8 2 4 7\"/></svg>
 "
 base_scale = 1.75
 saturation = 2.0
@@ -47,7 +54,7 @@ Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
 }
 
 [sub_resource type="DPITexture" id="DPITexture_ugp63"]
-_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M9 1v2h6V1zM4 1a1 1 0 0 0-.691.291l-2 2a1 1 0 0 0 1.414 1.414l.293-.293v7.172l-.293-.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l2-2a1 1 0 0 0-1.414-1.414l-.293.293V4.412l.293.293a1 1 0 0 0 1.414-1.414l-2-2A1 1 0 0 0 4 1zm5 6v2h4V7zm0 6v2h2v-2z\"/></svg>
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"none\" stroke=\"#e0e0e0\" stroke-width=\"2\" d=\"m3 3 10 10M3 13 13 3\"/></svg>
 "
 base_scale = 1.75
 saturation = 2.0
@@ -69,7 +76,7 @@ Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
 }
 
 [sub_resource type="DPITexture" id="DPITexture_tmnjh"]
-_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"m8 1a1 1 0 0 0 -1 1v5h-2c-1.108 0-2 .892-2 2v1h10v-1c0-1.108-.892-2-2-2h-2v-5a1 1 0 0 0 -1-1zm-5 10v4l10-1v-3z\"/></svg>
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M10.168 8.754a5 5 0 1 0-1.414 1.414l4.316 4.316 1.414-1.414zM6 3a3 3 0 0 1 0 6 3 3 0 0 1 0-6z\"/></svg>
 "
 base_scale = 1.75
 saturation = 2.0
@@ -80,7 +87,29 @@ Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
 }
 
 [sub_resource type="DPITexture" id="DPITexture_uojng"]
-_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"none\" stroke=\"#e0e0e0\" stroke-width=\"2\" d=\"m3 3 10 10M3 13 13 3\"/></svg>
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"m8 1a1 1 0 0 0 -1 1v5h-2c-1.108 0-2 .892-2 2v1h10v-1c0-1.108-.892-2-2-2h-2v-5a1 1 0 0 0 -1-1zm-5 10v4l10-1v-3z\"/></svg>
+"
+base_scale = 1.75
+saturation = 2.0
+color_map = {
+Color(1, 0.37254903, 0.37254903, 1): Color(1, 0.47, 0.42, 1),
+Color(0.37254903, 1, 0.5921569, 1): Color(0.45, 0.95, 0.5, 1),
+Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
+}
+
+[sub_resource type="DPITexture" id="DPITexture_34bl2"]
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M9 1v2h6V1zM4 1a1 1 0 0 0-.691.291l-2 2a1 1 0 0 0 1.414 1.414l.293-.293v7.172l-.293-.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l2-2a1 1 0 0 0-1.414-1.414l-.293.293V4.412l.293.293a1 1 0 0 0 1.414-1.414l-2-2A1 1 0 0 0 4 1zm5 6v2h4V7zm0 6v2h2v-2z\"/></svg>
+"
+base_scale = 1.75
+saturation = 2.0
+color_map = {
+Color(1, 0.37254903, 0.37254903, 1): Color(1, 0.47, 0.42, 1),
+Color(0.37254903, 1, 0.5921569, 1): Color(0.45, 0.95, 0.5, 1),
+Color(1, 0.8666667, 0.39607844, 1): Color(0.83, 0.78, 0.62, 1)
+}
+
+[sub_resource type="DPITexture" id="DPITexture_cuwiw"]
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#e0e0e0\" d=\"M3 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4l-3-3h-1v6H3zm1 0v5h3V1zm4 8a1 1 0 0 1 0 4 1 1 0 0 1 0-4z\"/></svg>
 "
 base_scale = 1.75
 saturation = 2.0
@@ -108,29 +137,42 @@ layout_mode = 2
 [node name="Toolbar" type="HBoxContainer" parent="VBoxContainer" unique_id=1474387420]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/Toolbar" unique_id=1361021078]
+[node name="DetailPanelContainer" type="PanelContainer" parent="VBoxContainer/Toolbar" unique_id=512704587]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_rhp01")
+
+[node name="DetailMarginContainer" type="MarginContainer" parent="VBoxContainer/Toolbar/DetailPanelContainer" unique_id=1715977903]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="DetailBar" type="HBoxContainer" parent="VBoxContainer/Toolbar/DetailPanelContainer/DetailMarginContainer" unique_id=1202758576]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/Toolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=1361021078]
 layout_mode = 2
 text = "Active Table:"
 
-[node name="CurrentTableLabel" type="Label" parent="VBoxContainer/Toolbar" unique_id=1592819480]
+[node name="CurrentTableLabel" type="Label" parent="VBoxContainer/Toolbar/DetailPanelContainer/DetailMarginContainer/DetailBar" unique_id=1592819480]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 0.5)
-text = "None Loaded"
+text = "None Loaded (Create or Load a DataTable Resource)"
 
 [node name="BtnNewTable" type="Button" parent="VBoxContainer/Toolbar" unique_id=1216440642]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Create a new DataTable .tres database."
-text = "New Table"
 icon = SubResource("DPITexture_rhp01")
 
 [node name="BtnLoadTable" type="Button" parent="VBoxContainer/Toolbar" unique_id=1396615891]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Load an existing DataTable from disk."
-text = "Load Table"
 icon = SubResource("DPITexture_37d74")
 
 [node name="VSeparator" type="VSeparator" parent="VBoxContainer/Toolbar" unique_id=1088817004]
@@ -141,43 +183,79 @@ unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Import data from CSV/JSON into this table."
 disabled = true
-text = "Import..."
-icon = SubResource("DPITexture_37d74")
+icon = SubResource("DPITexture_glws4")
 
 [node name="BtnExport" type="Button" parent="VBoxContainer/Toolbar" unique_id=985451399]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Export this table to CSV/JSON."
 disabled = true
-text = "Export..."
-icon = SubResource("DPITexture_glws4")
+icon = SubResource("DPITexture_u5ua0")
+
+[node name="VSeparator2" type="VSeparator" parent="VBoxContainer/Toolbar" unique_id=960749769]
+layout_mode = 2
+
+[node name="BtnCloseTable" type="Button" parent="VBoxContainer/Toolbar" unique_id=1593266193]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Close the active table workspace."
+disabled = true
+icon = SubResource("DPITexture_ugp63")
 
 [node name="HSeparator" type="HSeparator" parent="VBoxContainer" unique_id=100385767]
 layout_mode = 2
 
-[node name="Workspace" type="VBoxContainer" parent="VBoxContainer" unique_id=254418378]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="FilterToolbar" type="HBoxContainer" parent="VBoxContainer/Workspace" unique_id=286193183]
+[node name="FilterToolbar" type="HBoxContainer" parent="VBoxContainer" unique_id=286193183]
+custom_minimum_size = Vector2(0, 39)
 layout_mode = 2
 
-[node name="FilterBar" type="LineEdit" parent="VBoxContainer/Workspace/FilterToolbar" unique_id=53076407]
+[node name="BtnAddRow" type="Button" parent="VBoxContainer/FilterToolbar" unique_id=19218145]
 unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Add a new data row to the active table."
+disabled = true
+icon = SubResource("DPITexture_sms5l")
+
+[node name="FilterBar" type="LineEdit" parent="VBoxContainer/FilterToolbar" unique_id=53076407]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 65.5)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Filter Data..."
 editable = false
 clear_button_enabled = true
-right_icon = SubResource("DPITexture_u5ua0")
+right_icon = SubResource("DPITexture_tmnjh")
 
-[node name="BtnSaveSorting" type="Button" parent="VBoxContainer/Workspace/FilterToolbar" unique_id=1285451042]
+[node name="BtnClearTable" type="Button" parent="VBoxContainer/FilterToolbar" unique_id=883072776]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 39)
+layout_mode = 2
+tooltip_text = "Wipe all data rows from the active table."
+disabled = true
+icon = SubResource("DPITexture_uojng")
+
+[node name="BtnSaveSorting" type="Button" parent="VBoxContainer/FilterToolbar" unique_id=1285451042]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 39)
 layout_mode = 2
 tooltip_text = "Permanently overwrite the table's saved order with the current visual sort."
 disabled = true
-text = "Save Sort Order"
-icon = SubResource("DPITexture_ugp63")
+icon = SubResource("DPITexture_34bl2")
+
+[node name="BtnSaveTable" type="Button" parent="VBoxContainer/FilterToolbar" unique_id=1078789099]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 39)
+layout_mode = 2
+tooltip_text = "Save the current table to disk."
+disabled = true
+icon = SubResource("DPITexture_cuwiw")
+
+[node name="HSeparator3" type="HSeparator" parent="VBoxContainer" unique_id=1555088055]
+layout_mode = 2
+
+[node name="Workspace" type="VBoxContainer" parent="VBoxContainer" unique_id=254418378]
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="TableGrid" type="Tree" parent="VBoxContainer/Workspace" unique_id=83506344]
 unique_name_in_owner = true
@@ -185,7 +263,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_colors/guide_color = Color(1, 1, 1, 0.1)
-theme_override_constants/v_separation = 8
+theme_override_constants/v_separation = 12
 theme_override_constants/draw_guides = 1
 allow_rmb_select = true
 hide_root = true
@@ -196,42 +274,3 @@ layout_mode = 2
 
 [node name="ActionRow" type="HBoxContainer" parent="VBoxContainer" unique_id=612748609]
 layout_mode = 2
-
-[node name="BtnAddRow" type="Button" parent="VBoxContainer/ActionRow" unique_id=19218145]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Add a new data row to the active table."
-disabled = true
-text = "Add Data Row"
-icon = SubResource("DPITexture_sms5l")
-
-[node name="HBoxContainer" type="HBoxContainer" parent="VBoxContainer/ActionRow" unique_id=1221967366]
-layout_mode = 2
-size_flags_horizontal = 10
-
-[node name="BtnClearTable" type="Button" parent="VBoxContainer/ActionRow/HBoxContainer" unique_id=883072776]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 10
-tooltip_text = "Wipe all data rows from the active table."
-disabled = true
-text = "Clear Table"
-icon = SubResource("DPITexture_tmnjh")
-
-[node name="BtnSaveTable" type="Button" parent="VBoxContainer/ActionRow/HBoxContainer" unique_id=1078789099]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 10
-tooltip_text = "Force save the current table to disk."
-disabled = true
-text = "Save Table"
-icon = SubResource("DPITexture_glws4")
-
-[node name="BtnCloseTable" type="Button" parent="VBoxContainer/ActionRow/HBoxContainer" unique_id=1593266193]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 10
-tooltip_text = "Close the active table workspace."
-disabled = true
-text = "Close Table"
-icon = SubResource("DPITexture_uojng")

@@ -79,7 +79,7 @@ func _ready() -> void:
 	btn_load_schema.icon = _get_safe_theme_icon("Load")
 	btn_close_schema.icon = _get_safe_theme_icon("Close")
 	btn_add_field.icon = _get_safe_theme_icon("Add")
-	btn_compile.icon = _get_safe_theme_icon("Script")
+	btn_compile.icon = _get_safe_theme_icon("Save")
 	
 	btn_new_schema.tooltip_text = "Create a new DataStructure schema."
 	btn_load_schema.tooltip_text = "Load an existing DataStructure schema from disk."
@@ -206,15 +206,23 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		
 	var base_color: Color = EditorInterface.get_editor_settings().get("interface/theme/base_color") if Engine.is_editor_hint() else Color(0.2, 0.2, 0.2)
 	var style := StyleBoxFlat.new()
-	style.bg_color = base_color.lightened(0.05)
-	style.set_corner_radius_all(4)
+	style.bg_color = base_color.lightened(0.035)
+	style.set_corner_radius_all(8)
+	style.border_color = Color.BLACK.lightened(0.1)
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.shadow_color = Color.BLACK.lightened(0.1)
+	style.shadow_offset = Vector2(0, 1)
+	style.shadow_size = 1
 	card.add_theme_stylebox_override("panel", style)
 	
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 8)
 	margin.add_theme_constant_override("margin_right", 8)
-	margin.add_theme_constant_override("margin_top", 4)
-	margin.add_theme_constant_override("margin_bottom", 4)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
 	card.add_child(margin)
 	
 	var row := HBoxContainer.new()
@@ -232,8 +240,11 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		name_edit.text_changed.connect(func(_text: String): _mark_dirty())
 		name_edit.focus_exited.connect(func(): _validate_real_time(name_edit))
 		name_edit.text_submitted.connect(func(_text: String): _validate_real_time(name_edit))
-		
+	
+	var v_sep0 := VSeparator.new()
+	
 	row.add_child(name_edit)
+	row.add_child(v_sep0)
 	
 	# 3. Property Type Dropdown Selector
 	var type_dropdown := OptionButton.new()
@@ -392,8 +403,8 @@ func _update_button_states() -> void:
 		var row := card.get_child(0).get_child(0) as HBoxContainer
 		
 		# Based on our injection order: Up is child 5, Down is child 6
-		var up_btn := row.get_child(5) as Button
-		var down_btn := row.get_child(6) as Button
+		var up_btn := row.get_child(6) as Button
+		var down_btn := row.get_child(7) as Button
 		
 		if i == 0:
 			up_btn.disabled = true

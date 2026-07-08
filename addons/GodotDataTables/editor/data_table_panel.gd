@@ -121,9 +121,9 @@ func _ready() -> void:
 	btn_new_table.tooltip_text = "Create a new DataTable .tres database."
 	btn_load_table.icon = _get_safe_theme_icon("Load")
 	btn_load_table.tooltip_text = "Load an existing DataTable from disk."
-	btn_import.icon = _get_safe_theme_icon("Load")
+	btn_import.icon = _get_safe_theme_icon("MoveDown")
 	btn_import.tooltip_text = "Import data from CSV/JSON into this table."
-	btn_export.icon = _get_safe_theme_icon("Save")
+	btn_export.icon = _get_safe_theme_icon("MoveUp")
 	btn_export.tooltip_text = "Export this table to CSV/JSON."
 	btn_add_row.icon = _get_safe_theme_icon("Add")
 	btn_add_row.tooltip_text = "Add a new data row to the active table."
@@ -132,7 +132,7 @@ func _ready() -> void:
 	btn_close_table.icon = _get_safe_theme_icon("Close")
 	btn_close_table.tooltip_text = "Close the active table workspace."
 	btn_save_table.icon = _get_safe_theme_icon("Save")
-	btn_save_table.tooltip_text = "Force save the current table to disk."
+	btn_save_table.tooltip_text = "Save the current table to disk."
 	
 	btn_save_sorting.icon = _get_safe_theme_icon("Sort")
 	btn_save_sorting.tooltip_text = "Permanently overwrite the table's saved order with the current visual sort."
