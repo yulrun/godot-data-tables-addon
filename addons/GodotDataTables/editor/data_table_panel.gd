@@ -42,6 +42,9 @@ var active_row_for_duplication: StringName = &""
 ## Flags the workspace as unsaved, triggering visual warnings in the UI.
 var is_dirty: bool = false
 
+## Tracks if the table editor is currently locked to prevent accidental modifications.
+var is_locked: bool = false
+
 ## A map tracking which specific rows have unsaved modifications to show the row-level warning icon.
 var dirty_rows: Dictionary = {}
 
@@ -61,6 +64,8 @@ var delete_confirm: ConfirmationDialog
 var duplicate_confirm: ConfirmationDialog
 var clear_confirm: ConfirmationDialog
 var close_confirm: ConfirmationDialog
+var revert_confirm: ConfirmationDialog
+var lock_dirty_warning: AcceptDialog
 var import_conflict_dialog: ConfirmationDialog
 
 var vector_edit_dialog: ConfirmationDialog
@@ -86,6 +91,8 @@ var empty_icon: ImageTexture
 @onready var btn_add_row: Button = %BtnAddRow
 @onready var btn_clear_table: Button = %BtnClearTable
 @onready var btn_close_table: Button = %BtnCloseTable
+@onready var btn_revert: Button = %BtnRevert
+@onready var btn_lock_unlock: Button = %BtnLockUnlock
 @onready var btn_save_table: Button = %BtnSaveTable
 @onready var btn_save_sorting: Button = %BtnSaveSorting
 #endregion
@@ -118,23 +125,27 @@ func _ready() -> void:
 	filter_bar.text_changed.connect(_on_filter_text_changed)
 	
 	btn_new_table.icon = _get_safe_theme_icon("New")
-	btn_new_table.tooltip_text = "Create a new DataTable .tres database."
 	btn_load_table.icon = _get_safe_theme_icon("Load")
-	btn_load_table.tooltip_text = "Load an existing DataTable from disk."
 	btn_import.icon = _get_safe_theme_icon("MoveDown")
-	btn_import.tooltip_text = "Import data from CSV/JSON into this table."
 	btn_export.icon = _get_safe_theme_icon("MoveUp")
-	btn_export.tooltip_text = "Export this table to CSV/JSON."
 	btn_add_row.icon = _get_safe_theme_icon("Add")
-	btn_add_row.tooltip_text = "Add a new data row to the active table."
 	btn_clear_table.icon = _get_safe_theme_icon("Clear")
-	btn_clear_table.tooltip_text = "Wipe all data rows from the active table."
 	btn_close_table.icon = _get_safe_theme_icon("Close")
-	btn_close_table.tooltip_text = "Close the active table workspace."
+	btn_revert.icon = _get_safe_theme_icon("UndoRedo")
+	btn_lock_unlock.icon = _get_safe_theme_icon("Unlock")
 	btn_save_table.icon = _get_safe_theme_icon("Save")
-	btn_save_table.tooltip_text = "Save the current table to disk."
-	
 	btn_save_sorting.icon = _get_safe_theme_icon("Sort")
+	
+	btn_new_table.tooltip_text = "Create a new DataTable .tres database."
+	btn_load_table.tooltip_text = "Load an existing DataTable from disk."
+	btn_import.tooltip_text = "Import data from CSV/JSON into this table."
+	btn_export.tooltip_text = "Export this table to CSV/JSON."
+	btn_add_row.tooltip_text = "Add a new data row to the active table."
+	btn_clear_table.tooltip_text = "Wipe all data rows from the active table."
+	btn_close_table.tooltip_text = "Close the active table workspace."
+	btn_revert.tooltip_text = "Revert all unsaved changes and reload the table from disk."
+	btn_lock_unlock.tooltip_text = "Lock table to prevent accidental edits."
+	btn_save_table.tooltip_text = "Force save the current table to disk."
 	btn_save_sorting.tooltip_text = "Permanently overwrite the table's saved order with the current visual sort."
 	
 	btn_new_table.pressed.connect(_on_new_table_pressed)
@@ -144,6 +155,8 @@ func _ready() -> void:
 	btn_add_row.pressed.connect(_on_add_row_pressed)
 	btn_clear_table.pressed.connect(func(): clear_confirm.popup_centered())
 	btn_close_table.pressed.connect(_on_close_table_pressed)
+	btn_revert.pressed.connect(func(): revert_confirm.popup_centered())
+	btn_lock_unlock.pressed.connect(_on_lock_unlock_pressed)
 	btn_save_table.pressed.connect(_on_save_pressed)
 	btn_save_sorting.pressed.connect(_on_save_sorting_pressed)
 	
@@ -181,6 +194,17 @@ func _initialize_dynamic_dialogs() -> void:
 	close_confirm.dialog_text = "You have unsaved changes. Are you sure you want to close this table without saving?"
 	close_confirm.confirmed.connect(_execute_close_table)
 	add_child(close_confirm)
+	
+	revert_confirm = ConfirmationDialog.new()
+	revert_confirm.title = "Revert Changes"
+	revert_confirm.dialog_text = "Are you sure you want to revert all unsaved changes?\n\nThis will reload the table from disk and permanently discard your current modifications."
+	revert_confirm.confirmed.connect(_execute_revert_table)
+	add_child(revert_confirm)
+	
+	lock_dirty_warning = AcceptDialog.new()
+	lock_dirty_warning.title = "Cannot Lock Table"
+	lock_dirty_warning.dialog_text = "You have unsaved changes.\n\nPlease save your table, or revert changes, before locking the workspace."
+	add_child(lock_dirty_warning)
 	
 	import_conflict_dialog = ConfirmationDialog.new()
 	import_conflict_dialog.title = "Import Data Conflicts"
@@ -247,18 +271,31 @@ func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	return base_control.get_theme_icon("Object", "EditorIcons")
 
 
-### Refreshes the top label and toggles main action buttons.
-## Now supports State-Aware colors: Transparent (None), Hint (Active), Warning (Dirty).
+## Refreshes the top label and toggles main action buttons based on whether a table is currently loaded.
 func _update_ui_state() -> void:
 	var has_table: bool = is_instance_valid(active_table)
-	btn_add_row.disabled = not has_table
-	btn_clear_table.disabled = not has_table
+	var has_unsaved_changes: bool = has_table and is_dirty
+	
+	btn_add_row.disabled = not has_table or is_locked
+	btn_clear_table.disabled = not has_table or is_locked
+	btn_import.disabled = not has_table or is_locked
 	btn_close_table.disabled = not has_table
-	btn_save_table.disabled = not has_table
-	btn_import.disabled = not has_table
 	btn_export.disabled = not has_table
+	btn_lock_unlock.disabled = not has_table
+	
+	# Revert and Save are ONLY active if the table has unsaved changes
+	btn_save_table.disabled = not has_unsaved_changes
+	btn_revert.disabled = not has_unsaved_changes
 	btn_save_sorting.disabled = not has_table or active_sort_direction == 0
 	filter_bar.editable = has_table
+	
+	# Icon / Tooltip mapping for lock
+	if is_locked:
+		btn_lock_unlock.icon = _get_safe_theme_icon("Lock")
+		btn_lock_unlock.tooltip_text = "Unlock table for editing."
+	else:
+		btn_lock_unlock.icon = _get_safe_theme_icon("Unlock")
+		btn_lock_unlock.tooltip_text = "Lock table to prevent accidental edits."
 	
 	# Fetch editor colors dynamically
 	var hint_color: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
@@ -269,16 +306,31 @@ func _update_ui_state() -> void:
 			current_table_label.text = active_table_path.get_file() + " (Unsaved Changes)"
 			current_table_label.add_theme_color_override("font_color", warning_color)
 		else:
-			current_table_label.text = active_table_path.get_file()
+			var locked_text = " [LOCKED]" if is_locked else ""
+			current_table_label.text = active_table_path.get_file() + locked_text
 			current_table_label.add_theme_color_override("font_color", hint_color)
 			
 		if not is_instance_valid(active_table.row_schema):
 			current_table_label.text += " (WARNING: No Schema Assigned)"
 	else:
-		current_table_label.text = "None Loaded (Create or Load a DataTable Resource)"
+		current_table_label.text = "None Loaded"
 		# Set to transparent gray to indicate "Inactive"
 		current_table_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.5))
 		filter_bar.text = ""
+
+
+## Safely handles toggling the workspace lock state.
+func _on_lock_unlock_pressed() -> void:
+	if not is_locked:
+		if is_dirty:
+			lock_dirty_warning.popup_centered()
+			return
+		is_locked = true
+	else:
+		is_locked = false
+		
+	_update_ui_state()
+	refresh_current_table_view() # Rebuilding the tree safely re-applies all editable/disabled limits natively!
 #endregion
 
 
@@ -399,7 +451,7 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		
 		# Col 2: Row ID Editor
 		item.set_text(2, str(id))
-		item.set_editable(2, true)
+		item.set_editable(2, not is_locked) # Lock protection injected here
 		item.set_tooltip_text(2, "Type: StringName (Unique Identifier)")
 		
 		# Cols 3+: Dynamic Type Casting
@@ -433,7 +485,7 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			if expected_type == TYPE_BOOL:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_CHECK)
 				item.set_checked(col_idx, value as bool)
-				item.set_editable(col_idx, true)
+				item.set_editable(col_idx, not is_locked)
 				
 			elif expected_type == TYPE_VECTOR2 or expected_type == TYPE_VECTOR3:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
@@ -476,18 +528,18 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				# Excludes quotation marks from pure string values
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, str(value) if value != null else "")
-				item.set_editable(col_idx, true)
+				item.set_editable(col_idx, not is_locked)
 				
 			else:
 				# Var_to_str cleanly converts complex structs (Rect2, Transforms) into human readable text
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, var_to_str(value) if value != null else "")
-				item.set_editable(col_idx, true)
+				item.set_editable(col_idx, not is_locked)
 				
-		# Final Col: Inject row action buttons
+		# Final Col: Inject row action buttons with native disabled parameter
 		var action_col: int = tree.columns - 1
-		item.add_button(action_col, _get_safe_theme_icon("ActionCopy"), 0, false, "Duplicate Row")
-		item.add_button(action_col, _get_safe_theme_icon("Remove"), 1, false, "Delete Row")
+		item.add_button(action_col, _get_safe_theme_icon("ActionCopy"), 0, is_locked, "Duplicate Row")
+		item.add_button(action_col, _get_safe_theme_icon("Remove"), 1, is_locked, "Delete Row")
 
 
 ## Sweeps through all visible rows and dynamically applies background color overrides.
@@ -563,6 +615,8 @@ func _get_type_to_string(type_enum: int) -> String:
 #region Cell Editing & Context Actions
 ## Handles Double-Click on protected cells to launch native Godot configuration popups.
 func _on_item_activated() -> void:
+	if is_locked: return # Workspace protection
+	
 	var item: TreeItem = tree.get_selected()
 	var col: int = tree.get_selected_column()
 	
@@ -611,6 +665,8 @@ func _on_item_activated() -> void:
 
 ## Triggers context menu natively on Right-Click over data cells.
 func _on_item_mouse_selected(position: Vector2, mouse_button_index: int) -> void:
+	if is_locked: return # Workspace protection
+	
 	if mouse_button_index == MOUSE_BUTTON_RIGHT:
 		var item := tree.get_item_at_position(position)
 		var col := tree.get_column_at_position(position)
@@ -625,7 +681,7 @@ func _on_item_mouse_selected(position: Vector2, mouse_button_index: int) -> void
 
 ## Evaluates Context Menu clicks to safely Clear or Reset cell data.
 func _on_cell_context_menu_id_pressed(id: int) -> void:
-	if not is_instance_valid(active_cell_item): return
+	if not is_instance_valid(active_cell_item) or is_locked: return
 	
 	var row_id: StringName = active_cell_item.get_metadata(0)
 	var prop_idx: int = active_cell_column - 3
@@ -780,6 +836,8 @@ func _on_filter_text_changed(new_text: String) -> void:
 
 ## Routes clicks on natively generated cell action buttons to their respective sub-dialogs.
 func _on_tree_button_clicked(item: TreeItem, column: int, id: int, mouse_button_index: int) -> void:
+	if is_locked: return # Workspace protection
+	
 	var action_col: int = tree.columns - 1
 	var row_id: StringName = item.get_metadata(0)
 	
@@ -794,6 +852,8 @@ func _on_tree_button_clicked(item: TreeItem, column: int, id: int, mouse_button_
 
 ## Fires whenever a user hits enter or clicks away from an editable spreadsheet cell.
 func _on_cell_edited() -> void:
+	if is_locked: return # Workspace protection
+	
 	var item: TreeItem = tree.get_edited()
 	var col: int = tree.get_edited_column()
 	var original_id: StringName = item.get_metadata(0)
@@ -938,6 +998,8 @@ func _on_color_edit_confirmed() -> void:
 #region Native Drag and Drop Engine
 ## Initiates a drag event when grabbing an internal row.
 func _get_drag_data_fw(at_position: Vector2) -> Variant:
+	if is_locked: return null # Workspace protection
+	
 	var item: TreeItem = tree.get_item_at_position(at_position)
 	if not item or item == tree.get_root():
 		return null
@@ -953,6 +1015,8 @@ func _get_drag_data_fw(at_position: Vector2) -> Variant:
 
 ## Validates whether a dragged item (external file or internal row) can be dropped at the current cursor position.
 func _can_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
+	if is_locked: return false # Workspace protection
+	
 	if typeof(data) != TYPE_DICTIONARY or not data.has("type"):
 		return false
 		
@@ -991,6 +1055,8 @@ func _can_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
 
 ## Executes the data manipulation when a valid drop occurs.
 func _drop_data_fw(at_position: Vector2, data: Variant) -> void:
+	if is_locked: return # Workspace protection
+	
 	var item: TreeItem = tree.get_item_at_position(at_position)
 	if not item: return
 	
@@ -1120,6 +1186,7 @@ func _execute_close_table() -> void:
 	active_table_path = ""
 	active_table = null
 	is_dirty = false
+	is_locked = false
 	dirty_rows.clear()
 	filter_bar.text = ""
 	active_sort_column = -1
@@ -1132,6 +1199,21 @@ func _execute_close_table() -> void:
 	current_schema_properties.clear()
 	
 	_update_ui_state()
+
+
+## Discards all unsaved edits and completely reloads the table structure from the disk script.
+func _execute_revert_table() -> void:
+	if active_table_path.is_empty(): return
+	is_locked = false
+	
+	# FORCE DEEP CACHE RESET:
+	# Godot aggressively caches sub-resources within Dictionaries.
+	# By explicitly emptying the table in memory before we reload,
+	# we force the engine to parse fresh row instances directly from the disk!
+	if is_instance_valid(active_table):
+		active_table.clear_table()
+		
+	_on_load_picker_confirmed(active_table_path)
 
 
 ## Force pushes the resource save to disk and explicitly triggers an Editor refresh.
@@ -1158,12 +1240,16 @@ func _on_load_table_pressed() -> void:
 ## Loads the selected DataTable from the QuickOpen popup into the workspace.
 func _on_load_picker_confirmed(path: String) -> void:
 	if path.is_empty(): return
-	var loaded_res := load(path)
+	
+	# CRITICAL: We must use CACHE_MODE_REPLACE to bypass Godot's memory cache.
+	# Otherwise, 'reverting' will just load the dirty in-memory version instead of the disk file!
+	var loaded_res := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REPLACE)
 	
 	if loaded_res is DataTable:
 		active_table_path = path
 		active_table = loaded_res
 		is_dirty = false
+		is_locked = false
 		dirty_rows.clear()
 		active_sort_column = -1
 		active_sort_direction = 0
@@ -1208,6 +1294,7 @@ func _on_schema_picker_confirmed(schema_path: String) -> void:
 		active_table_path = pending_new_table_path
 		active_table = new_table
 		is_dirty = false
+		is_locked = false
 		dirty_rows.clear()
 		active_sort_column = -1
 		active_sort_direction = 0
