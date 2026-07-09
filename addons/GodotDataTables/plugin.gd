@@ -11,7 +11,9 @@ extends EditorPlugin
 
 
 const DOCK_SCENE: PackedScene = preload("res://addons/GodotDataTables/editor/data_table_dock.tscn")
+
 var dock_instance: Control = null
+var row_inspector_plugin: DataTableRowInspectorPlugin = null
 
 
 ## Executed when the plugin is enabled or when the project reloads.
@@ -32,6 +34,10 @@ func _enter_tree() -> void:
 	# Add to the Right-Lower dock slot by default. This can be moved manually by developers.
 	add_control_to_dock(DOCK_SLOT_BOTTOM, dock_instance)
 	
+	# Initialize and register the custom DataTableRowHandle inspector plugin
+	row_inspector_plugin = DataTableRowInspectorPlugin.new()
+	add_inspector_plugin(row_inspector_plugin)
+	
 	print("GodotDataTables Module: Successfully initialized and docked.")
 
 
@@ -42,6 +48,11 @@ func _exit_tree() -> void:
 		remove_control_from_docks(dock_instance)
 		dock_instance.queue_free()
 		dock_instance = null
+		
+	# Unregister and free the custom inspector plugin
+	if row_inspector_plugin:
+		remove_inspector_plugin(row_inspector_plugin)
+		row_inspector_plugin = null
 		
 	print("GodotDataTables Module: Successfully cleaned up resources and un-docked.")
 
