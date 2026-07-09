@@ -7,7 +7,7 @@
 ## @meta_author: Matthew Janes (YulRun Dev)
 ## @meta_license: MIT
 
-@icon("res://addons/GodotDataTables/icons/data_table.svg")
+@icon("res://addons/GodotDataTables/icons/data_table_row_handle.svg")
 @tool
 class_name DataTableRowHandle extends Resource
 
