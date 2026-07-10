@@ -4,7 +4,7 @@
 ## Spawns a dedicated fuzzy-search dialog, safely handling tables with 1,000+ rows.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @tool

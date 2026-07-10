@@ -4,7 +4,7 @@
 ## via var_to_str() and reconstructs them during import via str_to_var().
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @tool

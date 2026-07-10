@@ -3,7 +3,7 @@
 ## Handles the setup, positioning, and safe removal of the primary DataTable management workspace.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @tool

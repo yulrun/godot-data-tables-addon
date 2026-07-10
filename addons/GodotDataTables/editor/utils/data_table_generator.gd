@@ -4,7 +4,7 @@
 ## completely decoupled from any Editor UI logic.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT 
 
 @tool
@@ -21,7 +21,7 @@ static func generate_data_structure(schema_name: String, columns: Array[Dictiona
 	var script_content: String = """## Generated DataStructure schema for {schema_name}.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @icon("res://addons/GodotDataTables/icons/data_table_structure.svg")

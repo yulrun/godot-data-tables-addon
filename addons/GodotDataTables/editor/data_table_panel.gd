@@ -4,7 +4,7 @@
 ## using a Godot Tree node. Handles safe type casting, drag-and-drop, and data migrations.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @tool
@@ -56,6 +56,24 @@ var active_sort_column: int = -1
 
 ## Tracks the direction of the visual sort (1 = Ascending, -1 = Descending, 0 = None)
 var active_sort_direction: int = 0
+
+## Dialog explicitly for editing dynamic Arrays
+var array_edit_dialog: ConfirmationDialog
+
+## Tree nested inside the Array Editor Dialog
+var array_edit_tree: Tree
+
+## Internal memory reference holding the Array data currently being edited
+var active_array_ref: Array = []
+
+## Tracks the property schema dictionary associated with the array currently being edited
+var active_array_prop: Dictionary = {}
+
+## Tracks if the user is currently editing a deep element inside the Array Popup
+var is_editing_array_element: bool = false
+
+## Tracks the specific item inside the Array Tree currently being modified via sub-dialogs
+var active_array_cell_item: TreeItem = null
 #endregion
 
 
@@ -237,6 +255,7 @@ func _initialize_dynamic_dialogs() -> void:
 	# Setup Native Popups for Context Editors
 	vector_edit_dialog = ConfirmationDialog.new()
 	vector_edit_dialog.title = "Edit Vector"
+	vector_edit_dialog.exclusive = false # Allows safe pop-ups over the Array Dialog
 	var vec_vbox := VBoxContainer.new()
 	vector_edit_dialog.add_child(vec_vbox)
 	
@@ -263,11 +282,58 @@ func _initialize_dynamic_dialogs() -> void:
 	
 	color_edit_dialog = ConfirmationDialog.new()
 	color_edit_dialog.title = "Edit Color"
+	color_edit_dialog.exclusive = false # Allows safe pop-ups over the Array Dialog
 	color_picker = ColorPicker.new()
 	color_picker.edit_alpha = true
 	color_edit_dialog.add_child(color_picker)
 	color_edit_dialog.confirmed.connect(_on_color_edit_confirmed)
 	add_child(color_edit_dialog)
+	
+	# Custom Array Editor Dialog
+	array_edit_dialog = ConfirmationDialog.new()
+	array_edit_dialog.title = "Edit Array Data"
+	array_edit_dialog.exclusive = false # Prevents Window Lock clashes
+	
+	var array_vbox := VBoxContainer.new()
+	array_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	array_edit_dialog.add_child(array_vbox)
+	
+	array_edit_tree = Tree.new()
+	array_edit_tree.columns = 4 # We use 4 columns to bypass Godot's Tree node text-squishing bug
+	array_edit_tree.set_column_title(0, "!")
+	array_edit_tree.set_column_expand(0, false)
+	array_edit_tree.set_column_custom_minimum_width(0, 24)
+	array_edit_tree.set_column_title(1, "#")
+	array_edit_tree.set_column_expand(1, false)
+	array_edit_tree.set_column_custom_minimum_width(1, 40)
+	array_edit_tree.set_column_title(2, "Value")
+	array_edit_tree.set_column_expand(2, true)
+	array_edit_tree.set_column_title(3, "Actions")
+	array_edit_tree.set_column_expand(3, false)
+	array_edit_tree.set_column_custom_minimum_width(3, 60)
+	array_edit_tree.set_column_titles_visible(true)
+	array_edit_tree.hide_root = true
+	array_edit_tree.select_mode = Tree.SELECT_ROW
+	array_edit_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	
+	# Hook Array Tree Signals
+	array_edit_tree.button_clicked.connect(_on_array_tree_button_clicked)
+	array_edit_tree.item_edited.connect(_on_array_tree_item_edited)
+	array_edit_tree.item_activated.connect(_on_array_item_activated)
+	array_edit_tree.set_drag_forwarding(_get_array_drag_data_fw, _can_array_drop_data_fw, _array_drop_data_fw)
+	
+	array_vbox.add_child(array_edit_tree)
+	
+	# Add Element button locked perfectly out of the scroll zone
+	var btn_array_add := Button.new()
+	btn_array_add.text = "Add Element"
+	btn_array_add.icon = _get_safe_theme_icon("Add")
+	btn_array_add.pressed.connect(_on_array_add_pressed)
+	btn_array_add.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	array_vbox.add_child(btn_array_add)
+	
+	array_edit_dialog.confirmed.connect(_on_array_edit_confirmed)
+	add_child(array_edit_dialog)
 
 
 ## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
@@ -429,6 +495,11 @@ func _rebuild_tree_grid() -> void:
 func _populate_tree_rows(root: TreeItem) -> void:
 	var validation_results: Dictionary = active_table.validate_all_rows()
 	
+	# Cache a fresh schema instance outside the loop to cleanly extract perfect array types
+	var temp_schema = null
+	if is_instance_valid(active_table) and is_instance_valid(active_table.row_schema):
+		temp_schema = active_table.row_schema.get_script().new()
+	
 	# Iterate over the VISUAL array to natively scramble columns without corrupting save data
 	for id: StringName in visual_row_order:
 		if not active_table.rows.has(id): continue
@@ -447,10 +518,9 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			item.set_icon(0, _get_safe_theme_icon("StatusWarning"))
 			item.set_tooltip_text(0, "Unsaved Changes on Row")
 		else:
-			# Invisible pillar enforces column width perfectly on high DPI displays
 			item.set_icon(0, empty_icon) 
 			
-		# Col 1: Spreadsheet Row Number (Tracks TRUE data index to show sorting scrambles correctly)
+		# Col 1: Spreadsheet Row Number
 		var true_index: int = active_table.row_order.find(id) + 1
 		item.set_text(1, str(true_index))
 		item.set_text_alignment(1, HORIZONTAL_ALIGNMENT_CENTER)
@@ -458,7 +528,7 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		
 		# Col 2: Row ID Editor
 		item.set_text(2, str(id))
-		item.set_editable(2, not is_locked) # Lock protection injected here
+		item.set_editable(2, not is_locked)
 		item.set_tooltip_text(2, "Type: StringName (Unique Identifier)")
 		
 		# Cols 3+: Dynamic Type Casting
@@ -468,17 +538,18 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			var expected_type: int = prop["type"]
 			var value: Variant = row_data.get(prop["name"])
 			
-			# Engine Type Cast: Instantly resolves schema mismatches (e.g. schema changed a String to Int)
-			if value != null and typeof(value) != expected_type and expected_type != TYPE_OBJECT:
-				value = type_convert(value, expected_type)
-				row_data.set(prop["name"], value)
-				_mark_row_dirty(id)
+			# Engine Type Cast: Instantly resolves schema mismatches for base vars
+			if expected_type != TYPE_ARRAY and expected_type != TYPE_OBJECT:
+				if value != null and typeof(value) != expected_type:
+					value = type_convert(value, expected_type)
+					row_data.set(prop["name"], value)
+					_mark_row_dirty(id)
 				
-			# Apply Hover Tooltip explicitly identifying the variable type
 			var type_name: String = _get_type_to_string(expected_type)
 			if expected_type == TYPE_OBJECT and not prop.get("class_name", "").is_empty():
 				type_name = prop["class_name"]
-			item.set_tooltip_text(col_idx, "Type: " + type_name)
+			if expected_type != TYPE_ARRAY:
+				item.set_tooltip_text(col_idx, "Type: " + type_name)
 			
 			# SMART ALIGNMENT INJECTION
 			match expected_type:
@@ -498,27 +569,19 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				if value == null:
 					value = Vector2.ZERO if expected_type == TYPE_VECTOR2 else Vector3.ZERO
-					
 				if expected_type == TYPE_VECTOR2:
 					item.set_text(col_idx, "X: %s, Y: %s" % [value.x, value.y])
 				else:
 					item.set_text(col_idx, "X: %s, Y: %s, Z: %s" % [value.x, value.y, value.z])
-					
 				item.set_editable(col_idx, false)
 				
 			elif expected_type == TYPE_COLOR:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
-				if value == null:
-					value = Color.BLACK
-					
+				if value == null: value = Color.BLACK
 				item.set_text(col_idx, " #" + value.to_html(false))
-				
-				# Generate a custom texture swatch on the fly to preview the color seamlessly
 				var img := Image.create_empty(24, 16, false, Image.FORMAT_RGBA8)
 				img.fill(value as Color)
-				var tex := ImageTexture.create_from_image(img)
-				item.set_icon(col_idx, tex)
-				
+				item.set_icon(col_idx, ImageTexture.create_from_image(img))
 				item.set_editable(col_idx, false)
 				
 			elif expected_type == TYPE_OBJECT:
@@ -528,22 +591,59 @@ func _populate_tree_rows(root: TreeItem) -> void:
 					item.set_tooltip_text(col_idx, "Type: " + type_name + "\nPath: " + value.resource_path)
 				else:
 					item.set_text(col_idx, "<empty>")
-					
 				item.set_editable(col_idx, false) 
 				
 			elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
-				# Excludes quotation marks from pure string values
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, str(value) if value != null else "")
 				item.set_editable(col_idx, not is_locked)
 				
+			elif expected_type == TYPE_ARRAY:
+				# 1. Ensure Array strict typing matches schema perfectly via explicit type_convert iteration
+				var schema_arr: Array = []
+				if temp_schema:
+					schema_arr = temp_schema.get(prop["name"])
+					
+				if value == null or typeof(value) != TYPE_ARRAY or not (value as Array).is_same_typed(schema_arr):
+					var new_arr: Array = schema_arr.duplicate(true)
+					if value != null and typeof(value) == TYPE_ARRAY:
+						var old_arr: Array = value as Array
+						var target_type: int = new_arr.get_typed_builtin() if new_arr.is_typed() else TYPE_NIL
+						new_arr.resize(old_arr.size())
+						for arr_i in range(old_arr.size()):
+							if target_type != TYPE_NIL and typeof(old_arr[arr_i]) != target_type:
+								new_arr[arr_i] = type_convert(old_arr[arr_i], target_type)
+							else:
+								new_arr[arr_i] = old_arr[arr_i]
+					value = new_arr
+					row_data.set(prop["name"], value)
+					_mark_row_dirty(id)
+					
+				# 2. Extract Native Godot Type Info for UI Display
+				var array_type_str := "Variant[]"
+				var val_arr: Array = value as Array 
+				
+				if val_arr.is_typed():
+					var builtin: int = val_arr.get_typed_builtin()
+					if builtin != TYPE_NIL and builtin != TYPE_OBJECT:
+						array_type_str = _get_type_to_string(builtin) + "[]"
+					else:
+						var cname: StringName = val_arr.get_typed_class_name() 
+						if not cname.is_empty():
+							array_type_str = str(cname) + "[]"
+						else:
+							array_type_str = "Resource[]"
+							
+				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
+				item.set_text(col_idx, array_type_str + " (Size: " + str(val_arr.size()) + ")")
+				item.set_editable(col_idx, false)
+				item.set_tooltip_text(col_idx, "Type: " + array_type_str + "\nDouble-Click to Edit Elements")
+				
 			else:
-				# Var_to_str cleanly converts complex structs (Rect2, Transforms) into human readable text
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, var_to_str(value) if value != null else "")
 				item.set_editable(col_idx, not is_locked)
 				
-		# Final Col: Inject row action buttons with native disabled parameter
 		var action_col: int = tree.columns - 1
 		item.add_button(action_col, _get_safe_theme_icon("ActionCopy"), 0, is_locked, "Duplicate Row")
 		item.add_button(action_col, _get_safe_theme_icon("Remove"), 1, is_locked, "Delete Row")
@@ -616,6 +716,19 @@ func _get_type_to_string(type_enum: int) -> String:
 		TYPE_COLOR: return "Color"
 		TYPE_OBJECT: return "Resource"
 		_: return "Variant"
+
+
+## Parses PROPERTY_HINT_ARRAY_TYPE (24) hint string to get array subtype and class.
+func _get_array_subtype(prop: Dictionary) -> Dictionary:
+	var info = {"type": TYPE_NIL, "class_name": ""}
+	if prop.get("hint") == 24: # PROPERTY_HINT_ARRAY_TYPE
+		var hs: String = prop.get("hint_string", "")
+		if not hs.is_empty():
+			var parts = hs.split(":")
+			info["type"] = parts[0].split("/")[0].to_int()
+			if parts.size() > 1:
+				info["class_name"] = parts[1]
+	return info
 #endregion
 
 
@@ -637,6 +750,7 @@ func _on_item_activated() -> void:
 	var val: Variant = active_table.get_row(row_id).get(prop_name)
 	
 	if prop["type"] == TYPE_VECTOR2:
+		is_editing_array_element = false
 		active_cell_item = item
 		active_cell_column = col
 		if val == null: val = Vector2.ZERO
@@ -647,6 +761,7 @@ func _on_item_activated() -> void:
 		vector_edit_dialog.popup_centered()
 		
 	elif prop["type"] == TYPE_VECTOR3:
+		is_editing_array_element = false
 		active_cell_item = item
 		active_cell_column = col
 		if val == null: val = Vector3.ZERO
@@ -658,6 +773,7 @@ func _on_item_activated() -> void:
 		vector_edit_dialog.popup_centered()
 		
 	elif prop["type"] == TYPE_COLOR:
+		is_editing_array_element = false
 		active_cell_item = item
 		active_cell_column = col
 		if val == null: val = Color.BLACK
@@ -665,9 +781,32 @@ func _on_item_activated() -> void:
 		color_edit_dialog.popup_centered()
 		
 	elif prop["type"] == TYPE_OBJECT:
+		is_editing_array_element = false
 		active_cell_item = item
 		active_cell_column = col
-		_open_resource_picker_for_column(col)
+		
+		var class_type: String = prop.get("class_name", "")
+		var base_types := PackedStringArray()
+		if class_type == "Texture2D" or class_type == "Texture": base_types.append("Texture2D")
+		elif class_type == "PackedScene": base_types.append("PackedScene")
+		elif not class_type.is_empty(): base_types.append(class_type)
+		else: base_types.append("Resource")
+		
+		EditorInterface.popup_quick_open(_on_resource_file_selected, base_types)
+		
+	elif prop["type"] == TYPE_ARRAY:
+		is_editing_array_element = false
+		active_cell_item = item
+		active_cell_column = col
+		active_array_prop = prop
+		
+		if val == null:
+			active_array_ref = active_table.row_schema.get_script().new().get(prop_name).duplicate(true)
+		else:
+			active_array_ref = val.duplicate(true)
+			
+		_populate_array_edit_tree()
+		array_edit_dialog.popup_centered(Vector2(600, 500))
 
 
 ## Triggers context menu natively on Right-Click over data cells.
@@ -678,7 +817,6 @@ func _on_item_mouse_selected(position: Vector2, mouse_button_index: int) -> void
 		var item := tree.get_item_at_position(position)
 		var col := tree.get_column_at_position(position)
 		
-		# Only popup on dynamic data columns (Not Row ID, Not Actions, Not Status)
 		if item and col >= 3 and col < tree.columns - 1:
 			active_cell_item = item
 			active_cell_column = col
@@ -705,20 +843,21 @@ func _on_cell_context_menu_id_pressed(id: int) -> void:
 		elif prop["type"] == TYPE_VECTOR2: empty_val = Vector2.ZERO
 		elif prop["type"] == TYPE_VECTOR3: empty_val = Vector3.ZERO
 		elif prop["type"] == TYPE_COLOR: empty_val = Color.BLACK
+		elif prop["type"] == TYPE_ARRAY: 
+			empty_val = active_table.row_schema.get_script().new().get(prop_name).duplicate(true)
 		
-		if current_val != empty_val:
+		if typeof(current_val) != typeof(empty_val) or current_val != empty_val:
 			row_instance.set(prop_name, empty_val)
 			active_table.emit_changed()
 			_mark_row_dirty(row_id)
 			refresh_current_table_view()
 			
 	elif id == 1: # Reset to Default
-		# Instantiating a fresh schema automatically loads the designer's preset default values
 		var schema_script: GDScript = active_table.row_schema.get_script()
 		var temp_schema = schema_script.new()
 		var default_val = temp_schema.get(prop_name)
 		
-		if current_val != default_val:
+		if typeof(current_val) != typeof(default_val) or current_val != default_val:
 			row_instance.set(prop_name, default_val)
 			active_table.emit_changed()
 			_mark_row_dirty(row_id)
@@ -730,18 +869,13 @@ func _on_column_title_clicked(column: int, mouse_button_index: int) -> void:
 	if mouse_button_index != MOUSE_BUTTON_LEFT: 
 		return
 		
-	# Cannot sort the warning column, the index column, or the actions column
 	if column < 2 or column >= tree.columns - 1:
 		return
 		
 	if active_sort_column == column:
-		# Cycle: Ascending (1) -> Descending (-1) -> Clear (0) -> Ascending (1)
-		if active_sort_direction == 1:
-			active_sort_direction = -1
-		elif active_sort_direction == -1:
-			active_sort_direction = 0
-		elif active_sort_direction == 0:
-			active_sort_direction = 1
+		if active_sort_direction == 1: active_sort_direction = -1
+		elif active_sort_direction == -1: active_sort_direction = 0
+		elif active_sort_direction == 0: active_sort_direction = 1
 	else:
 		active_sort_column = column
 		active_sort_direction = 1
@@ -767,7 +901,6 @@ func _apply_current_sort() -> void:
 			
 	if prop_name.is_empty(): return
 	
-	# Execute the custom sort on the Visual Array decoupling it from the hard-save data
 	visual_row_order.sort_custom(func(a: StringName, b: StringName):
 		var val_a: Variant
 		var val_b: Variant
@@ -793,7 +926,6 @@ func _safe_compare(a: Variant, b: Variant, asc: bool) -> bool:
 	if a == null: a = ""
 	if b == null: b = ""
 	
-	# If types mismatch or are complex objects, compare them strictly via string casting
 	if typeof(a) != typeof(b) or typeof(a) == TYPE_OBJECT or typeof(a) == TYPE_DICTIONARY or typeof(a) == TYPE_ARRAY:
 		return str(a) < str(b) if asc else str(a) > str(b)
 		
@@ -928,45 +1060,46 @@ func _on_cell_edited() -> void:
 			item.set_text(col, var_to_str(new_value))
 
 
-## Uses Godot's native QuickOpen dialog to securely find Resources matching the column's expected class type.
-func _open_resource_picker_for_column(col: int) -> void:
-	var prop_idx: int = col - 3
-	var prop: Dictionary = current_schema_properties[prop_idx]
-	var class_type: String = prop.get("class_name", "")
-	var base_types := PackedStringArray()
-	
-	if class_type == "Texture2D" or class_type == "Texture":
-		base_types.append("Texture2D")
-	elif class_type == "PackedScene":
-		base_types.append("PackedScene")
-	elif not class_type.is_empty():
-		base_types.append(class_type)
-	else:
-		base_types.append("Resource")
-		
-	EditorInterface.popup_quick_open(_on_resource_file_selected, base_types)
-
-
-## Applies the resource selected via the Quick Open dialog.
+## Applies the resource selected via the Quick Open dialog. Supports array and main table routing.
 func _on_resource_file_selected(path: String) -> void:
-	if path.is_empty() or not is_instance_valid(active_cell_item): return
+	if path.is_empty(): return
 	var loaded_res: Resource = load(path)
+	if not loaded_res: return
 	
-	if loaded_res:
-		var row_id: StringName = active_cell_item.get_metadata(0)
-		var prop_idx: int = active_cell_column - 3
-		var prop_name: StringName = current_schema_properties[prop_idx]["name"]
-		var row_instance: DataStructure = active_table.get_row(row_id)
+	if is_editing_array_element:
+		if not is_instance_valid(active_array_cell_item): return
+		var idx: int = active_array_cell_item.get_metadata(0)
+		active_array_ref[idx] = loaded_res
+		_populate_array_edit_tree()
+		return
 		
-		if row_instance.get(prop_name) == loaded_res: return
-		row_instance.set(prop_name, loaded_res)
-		active_table.emit_changed()
-		_mark_row_dirty(row_id)
-		refresh_current_table_view()
+	# Standard Main-Table Object Routing
+	if not is_instance_valid(active_cell_item): return
+	var row_id: StringName = active_cell_item.get_metadata(0)
+	var prop_idx: int = active_cell_column - 3
+	var prop_name: StringName = current_schema_properties[prop_idx]["name"]
+	var row_instance: DataStructure = active_table.get_row(row_id)
+	
+	if row_instance.get(prop_name) == loaded_res: return
+	row_instance.set(prop_name, loaded_res)
+	active_table.emit_changed()
+	_mark_row_dirty(row_id)
+	refresh_current_table_view()
 
 
 ## Executes writing the Vector modifications back to the resource safely.
 func _on_vector_edit_confirmed() -> void:
+	if is_editing_array_element:
+		if not is_instance_valid(active_array_cell_item): return
+		var idx: int = active_array_cell_item.get_metadata(0)
+		if typeof(active_array_ref[idx]) == TYPE_VECTOR2:
+			active_array_ref[idx] = Vector2(vector_x_spin.value, vector_y_spin.value)
+		else:
+			active_array_ref[idx] = Vector3(vector_x_spin.value, vector_y_spin.value, vector_z_spin.value)
+		_populate_array_edit_tree()
+		return
+		
+	# Standard Main-Table Routing
 	if not is_instance_valid(active_cell_item): return
 	var row_id: StringName = active_cell_item.get_metadata(0)
 	var prop_idx: int = active_cell_column - 3
@@ -989,6 +1122,14 @@ func _on_vector_edit_confirmed() -> void:
 
 ## Executes writing the new Color back to the resource safely.
 func _on_color_edit_confirmed() -> void:
+	if is_editing_array_element:
+		if not is_instance_valid(active_array_cell_item): return
+		var idx: int = active_array_cell_item.get_metadata(0)
+		active_array_ref[idx] = color_picker.color
+		_populate_array_edit_tree()
+		return
+		
+	# Standard Main-Table Routing
 	if not is_instance_valid(active_cell_item): return
 	var row_id: StringName = active_cell_item.get_metadata(0)
 	var prop_idx: int = active_cell_column - 3
@@ -1390,4 +1531,281 @@ func _route_export_file(path: String) -> void:
 		EditorInterface.get_resource_filesystem().scan()
 	else:
 		printerr("GodotDataTables: Export failed with error code ", err)
+#endregion
+
+
+#region Array Editor
+## Generates the internal tree items for the array editor dialog, dynamically matching cell modes to element types.
+func _populate_array_edit_tree() -> void:
+	array_edit_tree.clear()
+	var root: TreeItem = array_edit_tree.create_item()
+	
+	var is_typed: bool = active_array_ref.is_typed()
+	var array_subtype: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
+	
+	for i: int in active_array_ref.size():
+		var val: Variant = active_array_ref[i]
+		var expected_type: int = array_subtype if array_subtype != TYPE_NIL else typeof(val)
+		
+		var item: TreeItem = array_edit_tree.create_item(root)
+		item.set_metadata(0, i)
+		
+		# Col 0: Padding Icon to prevent Godot from squishing Col 1 due to the Tree folding arrow
+		item.set_icon(0, empty_icon)
+		item.set_editable(0, false)
+		
+		# Col 1: Index Number
+		item.set_text(1, str(i))
+		item.set_text_alignment(1, HORIZONTAL_ALIGNMENT_CENTER)
+		item.set_editable(1, false)
+		
+		# Col 2: Smart Formatting exactly matching the main table logic
+		match expected_type:
+			TYPE_INT, TYPE_FLOAT:
+				item.set_text_alignment(2, HORIZONTAL_ALIGNMENT_RIGHT)
+			TYPE_BOOL, TYPE_COLOR, TYPE_VECTOR2, TYPE_VECTOR3:
+				item.set_text_alignment(2, HORIZONTAL_ALIGNMENT_CENTER)
+			_:
+				item.set_text_alignment(2, HORIZONTAL_ALIGNMENT_LEFT)
+				
+		if expected_type == TYPE_BOOL:
+			item.set_cell_mode(2, TreeItem.CELL_MODE_CHECK)
+			item.set_checked(2, val as bool)
+			item.set_editable(2, true)
+			
+		elif expected_type == TYPE_VECTOR2 or expected_type == TYPE_VECTOR3:
+			item.set_cell_mode(2, TreeItem.CELL_MODE_STRING)
+			if val == null:
+				val = Vector2.ZERO if expected_type == TYPE_VECTOR2 else Vector3.ZERO
+			if expected_type == TYPE_VECTOR2:
+				item.set_text(2, "X: %s, Y: %s" % [val.x, val.y])
+			else:
+				item.set_text(2, "X: %s, Y: %s, Z: %s" % [val.x, val.y, val.z])
+			item.set_editable(2, false)
+			item.set_tooltip_text(2, "Double-Click to Edit Vector")
+			
+		elif expected_type == TYPE_COLOR:
+			item.set_cell_mode(2, TreeItem.CELL_MODE_STRING)
+			if val == null: val = Color.BLACK
+			item.set_text(2, " #" + val.to_html(false))
+			
+			var img := Image.create_empty(24, 16, false, Image.FORMAT_RGBA8)
+			img.fill(val as Color)
+			item.set_icon(2, ImageTexture.create_from_image(img))
+			item.set_editable(2, false)
+			item.set_tooltip_text(2, "Double-Click to Edit Color")
+			
+		elif expected_type == TYPE_OBJECT:
+			item.set_cell_mode(2, TreeItem.CELL_MODE_STRING)
+			if val and val.resource_path:
+				item.set_text(2, val.resource_path.get_file())
+				item.set_tooltip_text(2, val.resource_path)
+			else:
+				item.set_text(2, "<empty>")
+			item.set_editable(2, false)
+			item.set_tooltip_text(2, "Double-Click to Load Resource")
+			
+		elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
+			item.set_cell_mode(2, TreeItem.CELL_MODE_STRING)
+			item.set_text(2, str(val) if val != null else "")
+			item.set_editable(2, true)
+			
+		else:
+			item.set_cell_mode(2, TreeItem.CELL_MODE_STRING)
+			item.set_text(2, var_to_str(val) if val != null else "")
+			item.set_editable(2, true)
+			
+		# Col 3: Row Actions
+		item.add_button(3, _get_safe_theme_icon("ActionCopy"), 0, false, "Duplicate Element")
+		item.add_button(3, _get_safe_theme_icon("Remove"), 1, false, "Delete Element")
+
+
+## Injects a new element into the array safely depending on Godot's internal strict typing logic.
+func _on_array_add_pressed() -> void:
+	if active_array_ref.is_typed():
+		var type = active_array_ref.get_typed_builtin()
+		# Forcing a resize on typed arrays automatically injects Godot's zero-state (e.g. false, 0.0) without crashing!
+		if type != TYPE_NIL and type != TYPE_OBJECT:
+			active_array_ref.resize(active_array_ref.size() + 1)
+		else:
+			active_array_ref.append(null)
+	else:
+		active_array_ref.append(null)
+		
+	_populate_array_edit_tree()
+
+
+## Evaluates simple string changes directly in the popup grid for numbers/strings/untyped.
+func _on_array_tree_item_edited() -> void:
+	var item: TreeItem = array_edit_tree.get_edited()
+	var col: int = array_edit_tree.get_edited_column()
+	
+	if col == 2:
+		var idx: int = item.get_metadata(0)
+		var is_typed: bool = active_array_ref.is_typed()
+		var array_subtype: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
+		var expected_type: int = array_subtype if array_subtype != TYPE_NIL else typeof(active_array_ref[idx])
+		
+		if expected_type == TYPE_BOOL:
+			active_array_ref[idx] = item.is_checked(2)
+		else:
+			var raw_string: String = item.get_text(2)
+			if expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
+				active_array_ref[idx] = raw_string
+			else:
+				var parsed: Variant = str_to_var(raw_string)
+				if parsed != null or raw_string == "null":
+					active_array_ref[idx] = parsed
+				else:
+					if expected_type != TYPE_NIL:
+						active_array_ref[idx] = type_convert(raw_string, expected_type)
+					else:
+						active_array_ref[idx] = raw_string
+						
+		_populate_array_edit_tree()
+
+
+## Launches custom sub-dialogs for complex Types when a user double clicks an Array row.
+func _on_array_item_activated() -> void:
+	var item: TreeItem = array_edit_tree.get_selected()
+	var col: int = array_edit_tree.get_selected_column()
+	
+	if not item or col != 2: return
+	
+	var idx: int = item.get_metadata(0)
+	var val: Variant = active_array_ref[idx]
+	var is_typed: bool = active_array_ref.is_typed()
+	var array_subtype: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
+	var expected_type: int = array_subtype if array_subtype != TYPE_NIL else typeof(val)
+	
+	is_editing_array_element = true
+	active_array_cell_item = item
+	
+	if expected_type == TYPE_VECTOR2:
+		if val == null: val = Vector2.ZERO
+		vector_x_spin.value = val.x
+		vector_y_spin.value = val.y
+		vector_z_spin.get_parent().hide()
+		vector_edit_dialog.title = "Edit Array Vector2"
+		vector_edit_dialog.popup_centered()
+		
+	elif expected_type == TYPE_VECTOR3:
+		if val == null: val = Vector3.ZERO
+		vector_x_spin.value = val.x
+		vector_y_spin.value = val.y
+		vector_z_spin.value = val.z
+		vector_z_spin.get_parent().show()
+		vector_edit_dialog.title = "Edit Array Vector3"
+		vector_edit_dialog.popup_centered()
+		
+	elif expected_type == TYPE_COLOR:
+		if val == null: val = Color.BLACK
+		color_picker.color = val
+		color_edit_dialog.popup_centered()
+		
+	elif expected_type == TYPE_OBJECT:
+		var base_types := PackedStringArray()
+		var array_class: StringName = active_array_ref.get_typed_class_name() if is_typed else &""
+		
+		if not array_class.is_empty():
+			base_types.append(array_class)
+		else:
+			base_types.append("Resource")
+			
+		EditorInterface.popup_quick_open(_on_resource_file_selected, base_types)
+
+
+## Handles Duplication and Deletion from the inline Array Action column.
+func _on_array_tree_button_clicked(item: TreeItem, column: int, id: int, _mouse_button_index: int) -> void:
+	if column == 3:
+		var idx: int = item.get_metadata(0)
+		if id == 0: # Duplicate Element
+			var val = active_array_ref[idx]
+			active_array_ref.insert(idx + 1, val)
+		elif id == 1: # Delete Element
+			active_array_ref.remove_at(idx)
+			
+		_populate_array_edit_tree()
+
+
+## Closes the editor and commits the array data back to the core resource.
+func _on_array_edit_confirmed() -> void:
+	if not is_instance_valid(active_cell_item): return
+	var row_id: StringName = active_cell_item.get_metadata(0)
+	var row_instance: DataStructure = active_table.get_row(row_id)
+	var prop_name: StringName = active_array_prop["name"]
+	
+	if row_instance.get(prop_name) != active_array_ref:
+		row_instance.set(prop_name, active_array_ref)
+		active_table.emit_changed()
+		_mark_row_dirty(row_id)
+		refresh_current_table_view()
+
+
+#region Array Drag and Drop 
+func _get_array_drag_data_fw(at_position: Vector2) -> Variant:
+	var item: TreeItem = array_edit_tree.get_item_at_position(at_position)
+	if not item or item == array_edit_tree.get_root(): return null
+	
+	var idx: int = item.get_metadata(0)
+	var preview := Label.new()
+	preview.text = " Moving Element " + str(idx) + " "
+	preview.add_theme_stylebox_override("normal", get_theme_stylebox("panel", "TooltipPanel"))
+	array_edit_tree.set_drag_preview(preview)
+	
+	return {"type": "array_element", "idx": idx}
+
+
+func _can_array_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
+	if typeof(data) != TYPE_DICTIONARY or not data.has("type"): return false
+	
+	var item: TreeItem = array_edit_tree.get_item_at_position(at_position)
+	if not item: 
+		array_edit_tree.drop_mode_flags = Tree.DROP_MODE_DISABLED
+		return false
+	
+	if data["type"] == "array_element":
+		array_edit_tree.drop_mode_flags = Tree.DROP_MODE_INBETWEEN
+		return true
+		
+	if data["type"] == "files":
+		array_edit_tree.drop_mode_flags = Tree.DROP_MODE_ON_ITEM
+		var is_typed: bool = active_array_ref.is_typed()
+		var expected_type: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
+		if expected_type == TYPE_OBJECT or expected_type == TYPE_NIL:
+			return true
+			
+	return false
+
+
+func _array_drop_data_fw(at_position: Vector2, data: Variant) -> void:
+	var item: TreeItem = array_edit_tree.get_item_at_position(at_position)
+	if not item: return
+	
+	var target_idx: int = item.get_metadata(0)
+	
+	if data["type"] == "files":
+		var file_path: String = data["files"][0]
+		var loaded_res: Resource = load(file_path)
+		if loaded_res:
+			active_array_ref[target_idx] = loaded_res
+			_populate_array_edit_tree()
+		return
+		
+	if data["type"] == "array_element":
+		var source_idx: int = data["idx"]
+		if source_idx == target_idx: return
+		
+		var drop_section: int = array_edit_tree.get_drop_section_at_position(at_position)
+		var element = active_array_ref[source_idx]
+		active_array_ref.remove_at(source_idx)
+		
+		if source_idx < target_idx:
+			target_idx -= 1
+			
+		if drop_section == 1:
+			target_idx += 1
+			
+		active_array_ref.insert(target_idx, element)
+		_populate_array_edit_tree()
 #endregion

@@ -1,7 +1,7 @@
 ## A core database container that stores and organizes strongly-typed DataStructure rows.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @icon("res://addons/GodotDataTables/icons/data_table.svg")

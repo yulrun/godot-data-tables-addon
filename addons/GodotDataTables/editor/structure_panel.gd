@@ -4,7 +4,7 @@
 ## optimized, strongly-typed GDScript files for the core engine.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT
 
 @tool
@@ -82,7 +82,6 @@ func _ready() -> void:
 		
 	_initialize_dynamic_dialogs()
 	
-	# Apply Native Editor Icons & Tooltips
 	btn_new_schema.icon = _get_safe_theme_icon("New")
 	btn_load_schema.icon = _get_safe_theme_icon("Load")
 	btn_close_schema.icon = _get_safe_theme_icon("Close")
@@ -105,22 +104,17 @@ func _ready() -> void:
 	btn_revert.pressed.connect(func(): revert_confirm.popup_centered())
 	btn_lock_unlock.pressed.connect(_on_lock_unlock_pressed)
 	
-	# Connect add field so the new card instantly highlights yellow to signify unsaved!
 	btn_add_field.pressed.connect(func(): 
 		var card = add_blank_property_row()
 		_mark_row_dirty(card)
 	)
 	
-	# Safe compile routing
 	btn_compile.pressed.connect(func(): compile_confirm.popup_centered())
-	
-	# Enforce breathing room between our property "Cards"
 	fields_container.add_theme_constant_override("separation", 8)
 	
 	_update_ui_state()
 
 
-## Builds native popups programmatically to keep the Scene tree clean.
 func _initialize_dynamic_dialogs() -> void:
 	delete_confirm = ConfirmationDialog.new()
 	delete_confirm.dialog_text = "Are you sure you want to remove this property?"
@@ -167,7 +161,6 @@ func _initialize_dynamic_dialogs() -> void:
 	validation_dialog.title = "Validation Error"
 	add_child(validation_dialog)
 	
-	# The Fuzzy Resource/Type Selector 
 	class_picker = ConfirmationDialog.new()
 	class_picker.title = "Select Resource Type"
 	class_picker.size = Vector2(400, 500)
@@ -191,7 +184,6 @@ func _initialize_dynamic_dialogs() -> void:
 	add_child(class_picker)
 
 
-## Safely fetches an icon from the editor theme, falling back to "Object" if broken/missing.
 func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	var base_control := EditorInterface.get_base_control()
 	if base_control.has_theme_icon(icon_name, "EditorIcons"):
@@ -199,27 +191,23 @@ func _get_safe_theme_icon(icon_name: String) -> Texture2D:
 	return base_control.get_theme_icon("Object", "EditorIcons")
 
 
-## Flags the workspace as unsaved, updating the label with yellow warning text.
 func _mark_dirty() -> void:
 	if not is_dirty and not active_script_path.is_empty():
 		is_dirty = true
 		_update_ui_state()
 
 
-## Highlights a specific property card to visually indicate it has unsaved modifications.
 func _mark_row_dirty(card: PanelContainer) -> void:
 	if not card.has_meta("is_row_dirty"):
 		card.set_meta("is_row_dirty", true)
 		var style: StyleBoxFlat = card.get_theme_stylebox("panel")
-		var warning_color := Color(1.0, 0.8, 0.4, 0.15) # Faint yellow tint
+		var warning_color := Color(1.0, 0.8, 0.4, 0.15) 
 		style.bg_color = style.bg_color.blend(warning_color)
-		style.border_color = Color(1.0, 0.8, 0.4, 0.5) # Hard yellow border
+		style.border_color = Color(1.0, 0.8, 0.4, 0.5) 
 		
-	# Ensure the global file is also flagged as unsaved!
 	_mark_dirty()
 
 
-## Wipes the yellow warning highlight from all cards after a successful compile.
 func _clear_all_row_dirty_states() -> void:
 	var base_color: Color = EditorInterface.get_editor_settings().get("interface/theme/base_color") if Engine.is_editor_hint() else Color(0.2, 0.2, 0.2)
 	for card in property_rows:
@@ -230,8 +218,6 @@ func _clear_all_row_dirty_states() -> void:
 			style.border_color = Color.BLACK.lightened(0.1)
 
 
-## Refreshes the top label and toggles main action buttons.
-## Now supports State-Aware colors: Transparent (None), Hint (Active), Warning (Dirty).
 func _update_ui_state() -> void:
 	var baseline_active := not active_script_path.is_empty()
 	var has_unsaved_changes := baseline_active and is_dirty
@@ -240,11 +226,9 @@ func _update_ui_state() -> void:
 	btn_add_field.disabled = not baseline_active or is_locked
 	btn_close_schema.disabled = not baseline_active
 	
-	# Both revert and compile buttons are ONLY active if the table has unsaved changes
 	btn_revert.disabled = not has_unsaved_changes
 	btn_compile.disabled = not has_unsaved_changes
 	
-	# Icon / Tooltip mapping for lock
 	if is_locked:
 		btn_lock_unlock.icon = _get_safe_theme_icon("Lock")
 		btn_lock_unlock.tooltip_text = "Unlock schema for editing."
@@ -252,7 +236,6 @@ func _update_ui_state() -> void:
 		btn_lock_unlock.icon = _get_safe_theme_icon("Unlock")
 		btn_lock_unlock.tooltip_text = "Lock schema to prevent accidental edits."
 	
-	# Fetch editor colors dynamically
 	var hint_color: Color = EditorInterface.get_editor_settings().get("interface/theme/accent_color")
 	var warning_color: Color = Color(1.0, 0.8, 0.4)
 	
@@ -266,11 +249,9 @@ func _update_ui_state() -> void:
 			current_schema_label.add_theme_color_override("font_color", hint_color)
 	else:
 		current_schema_label.text = "None Loaded (Create or Load a DataStructure Script)"
-		# Set to transparent gray to indicate "Inactive"
 		current_schema_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.5))
 
 
-## Safely handles toggling the workspace lock state.
 func _on_lock_unlock_pressed() -> void:
 	if not is_locked:
 		if is_dirty:
@@ -287,11 +268,10 @@ func _on_lock_unlock_pressed() -> void:
 
 
 #region Row Management & Manipulation
-## Appends an interactive field mapping row encapsulated inside a stylish UI "Card".
-func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null) -> PanelContainer:
+func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null, is_array: bool = false) -> PanelContainer:
 	var is_core_identifier: bool = (prop_name == "row_id")
 	
-	# 1. The Card Enclosure (PanelContainer)
+	# 1. The Card Enclosure
 	var card := PanelContainer.new()
 	if is_core_identifier:
 		card.tooltip_text = "Default row key identifier. Cannot be modified or moved."
@@ -320,7 +300,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	var row := HBoxContainer.new()
 	margin.add_child(row)
 		
-	# 2. Property Name Input
+	# 2. Property Name Input (Child 0)
 	var name_edit := LineEdit.new()
 	name_edit.placeholder_text = "property_name"
 	name_edit.text = prop_name
@@ -334,11 +314,10 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		name_edit.text_submitted.connect(func(_text: String): _validate_real_time(name_edit))
 	
 	var v_sep0 := VSeparator.new()
-	
 	row.add_child(name_edit)
-	row.add_child(v_sep0)
+	row.add_child(v_sep0) # Child 1
 	
-	# 3. Property Type Dropdown Selector
+	# 3. Property Type Dropdown Selector (Child 2)
 	var type_dropdown := OptionButton.new()
 	type_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
@@ -372,14 +351,33 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		var new_idx := type_dropdown.item_count - 1
 		type_dropdown.selected = new_idx
 		
-	var v_sep1 := VSeparator.new()
+	row.add_child(type_dropdown)
 	
-	# 4. Context-Aware Default Value Container
+	# 3.5. Is Array Checkbox (Child 3)
+	var array_cb := CheckBox.new()
+	array_cb.text = "Array?"
+	array_cb.button_pressed = is_array
+	if is_core_identifier:
+		array_cb.disabled = true
+	row.add_child(array_cb)
+	
+	var v_sep1 := VSeparator.new()
+	row.add_child(v_sep1) # Child 4
+	
+	# 4. Context-Aware Default Value Container (Child 5)
 	var default_container := HBoxContainer.new()
 	default_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	default_container.set_meta("is_core_identifier", is_core_identifier)
 	
-	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val, card)
+	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val, card, is_array)
+	
+	array_cb.toggled.connect(func(pressed: bool):
+		var current_type = type_dropdown.get_item_text(type_dropdown.selected)
+		if type_dropdown.selected == native_idx or type_dropdown.selected == custom_idx:
+			current_type = "Variant"
+		_rebuild_default_value_ui(default_container, current_type, null, card, pressed)
+		_mark_row_dirty(card)
+	)
 	
 	type_dropdown.item_selected.connect(func(idx: int):
 		_mark_row_dirty(card)
@@ -399,24 +397,22 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 			class_picker.popup_centered()
 		else:
 			var new_type = type_dropdown.get_item_text(idx)
-			_rebuild_default_value_ui(default_container, new_type, null, card)
+			_rebuild_default_value_ui(default_container, new_type, null, card, array_cb.button_pressed)
 	)
 	
-	row.add_child(type_dropdown)
-	row.add_child(v_sep1)
 	row.add_child(default_container)
 	
 	var v_sep2 := VSeparator.new()
-	row.add_child(v_sep2)
+	row.add_child(v_sep2) # Child 6
 	
-	# 5. Move Up Action Button
+	# 5. Move Up Action Button (Child 7)
 	var up_btn := Button.new()
 	up_btn.icon = _get_safe_theme_icon("MoveUp")
 	up_btn.tooltip_text = "Move Property Up"
 	up_btn.pressed.connect(func(): _move_row_up(card))
 	row.add_child(up_btn)
 	
-	# 6. Move Down Action Button
+	# 6. Move Down Action Button (Child 8)
 	var down_btn := Button.new()
 	down_btn.icon = _get_safe_theme_icon("MoveDown")
 	down_btn.tooltip_text = "Move Property Down"
@@ -424,9 +420,9 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	row.add_child(down_btn)
 	
 	var v_sep3 := VSeparator.new()
-	row.add_child(v_sep3)
+	row.add_child(v_sep3) # Child 9
 	
-	# 7. Duplicate Action Button
+	# 7. Duplicate Action Button (Child 10)
 	var duplicate_btn := Button.new()
 	duplicate_btn.icon = _get_safe_theme_icon("ActionCopy")
 	if is_core_identifier:
@@ -439,7 +435,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		)
 	row.add_child(duplicate_btn)
 	
-	# 8. Row Removal Action Button
+	# 8. Row Removal Action Button (Child 11)
 	var delete_btn := Button.new()
 	delete_btn.icon = _get_safe_theme_icon("Remove")
 	if is_core_identifier:
@@ -452,7 +448,6 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		)
 	row.add_child(delete_btn)
 	
-	# Append the Card wrapper, not just the row!
 	fields_container.add_child(card)
 	property_rows.append(card)
 	
@@ -460,28 +455,28 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	return card
 
 
-## Iterates through all cards to strictly enforce the Lock/Unlock state dynamically.
 func _set_rows_locked(locked: bool) -> void:
 	for card in property_rows:
 		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
 		var type_drop := row.get_child(2) as OptionButton
-		var default_container := row.get_child(4) as HBoxContainer
-		var duplicate_btn := row.get_child(9) as Button
-		var delete_btn := row.get_child(10) as Button
+		var array_cb := row.get_child(3) as CheckBox
+		var default_container := row.get_child(5) as HBoxContainer
+		var duplicate_btn := row.get_child(10) as Button
+		var delete_btn := row.get_child(11) as Button
 		
 		var is_core = (name_edit.text == "row_id")
 		
 		if not is_core:
 			name_edit.editable = not locked
 			type_drop.disabled = locked
+			array_cb.disabled = locked
 			duplicate_btn.disabled = locked
 			delete_btn.disabled = locked
 			
 		_set_default_container_locked(default_container, locked)
 
 
-## Safely strips interaction privileges from dynamically generated default value controls.
 func _set_default_container_locked(container: HBoxContainer, locked: bool) -> void:
 	for child in container.get_children():
 		if child is CheckBox:
@@ -497,14 +492,12 @@ func _set_default_container_locked(container: HBoxContainer, locked: bool) -> vo
 				elif subchild is LineEdit:
 					if subchild.placeholder_text == "#HEX Color":
 						subchild.editable = not locked
-					# Always keep the Resource string un-editable
 				elif subchild is SpinBox:
 					subchild.editable = not locked
 				elif subchild is Button:
 					subchild.disabled = locked
 
 
-## Shifts a specific property card up in the visual hierarchy and internal array.
 func _move_row_up(card: PanelContainer) -> void:
 	var idx: int = property_rows.find(card)
 	if idx <= 1: return 
@@ -518,7 +511,6 @@ func _move_row_up(card: PanelContainer) -> void:
 	_mark_row_dirty(card)
 
 
-## Shifts a specific property card down in the visual hierarchy and internal array.
 func _move_row_down(card: PanelContainer) -> void:
 	var idx: int = property_rows.find(card)
 	if idx <= 0 or idx >= property_rows.size() - 1: return 
@@ -532,15 +524,13 @@ func _move_row_down(card: PanelContainer) -> void:
 	_mark_row_dirty(card)
 
 
-## Iterates through all rows and safely disables up/down movement on boundary items.
 func _update_button_states() -> void:
 	for i: int in property_rows.size():
 		var card: PanelContainer = property_rows[i]
 		var row := card.get_child(0).get_child(0) as HBoxContainer
 		
-		# Based on our injection order: Up is child 6, Down is child 7
-		var up_btn := row.get_child(6) as Button
-		var down_btn := row.get_child(7) as Button
+		var up_btn := row.get_child(7) as Button
+		var down_btn := row.get_child(8) as Button
 		
 		if is_locked:
 			up_btn.disabled = true
@@ -549,11 +539,10 @@ func _update_button_states() -> void:
 			up_btn.disabled = true
 			down_btn.disabled = true
 		else:
-			up_btn.disabled = (i == 1) # First editable row cannot go up
-			down_btn.disabled = (i == property_rows.size() - 1) # Last row cannot go down
+			up_btn.disabled = (i == 1)
+			down_btn.disabled = (i == property_rows.size() - 1)
 
 
-## Handles the confirmed deletion of a property card.
 func _execute_row_deletion() -> void:
 	if is_instance_valid(active_row_for_deletion):
 		property_rows.erase(active_row_for_deletion)
@@ -563,13 +552,13 @@ func _execute_row_deletion() -> void:
 		_mark_dirty()
 
 
-## Handles the confirmed duplication of a property card, auto-incrementing its name.
 func _execute_row_duplication() -> void:
 	if is_instance_valid(active_row_for_duplication):
 		var row := active_row_for_duplication.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
 		var type_drop := row.get_child(2) as OptionButton
-		var default_container := row.get_child(4) as HBoxContainer
+		var array_cb := row.get_child(3) as CheckBox
+		var default_container := row.get_child(5) as HBoxContainer
 		
 		var original_name: String = name_edit.text
 		var new_name: String = _get_unique_property_name(original_name)
@@ -579,12 +568,11 @@ func _execute_row_duplication() -> void:
 		if default_container.has_meta("default_val"):
 			current_default = default_container.get_meta("default_val")
 		
-		var new_card = add_blank_property_row(new_name, type_string, current_default)
+		var new_card = add_blank_property_row(new_name, type_string, current_default, array_cb.button_pressed)
 		_mark_row_dirty(new_card)
 		active_row_for_duplication = null
 
 
-## Generates a unique property name by appending or incrementing a trailing number.
 func _get_unique_property_name(base_name: String) -> String:
 	var existing_names: Array[String] = []
 	for card: PanelContainer in property_rows:
@@ -612,7 +600,6 @@ func _get_unique_property_name(base_name: String) -> String:
 	return new_name
 
 
-## Clears all visual rows from the workspace when loading a new file.
 func clear_workspace() -> void:
 	for card: PanelContainer in property_rows:
 		if is_instance_valid(card):
@@ -622,7 +609,6 @@ func clear_workspace() -> void:
 
 
 #region Type Selection & Validation
-## Populates the searchable ItemList with all custom Resource scripts or Native Classes.
 func _populate_class_list(filter: String = "") -> void:
 	class_list.clear()
 	var filter_lower := filter.to_lower()
@@ -659,7 +645,6 @@ func _populate_class_list(filter: String = "") -> void:
 				class_list.set_item_metadata(item_idx, tex)
 
 
-## Called when the user confirms their custom/native class selection from the popup.
 func _on_custom_class_selected() -> void:
 	if not is_instance_valid(active_dropdown_for_custom):
 		return
@@ -678,36 +663,35 @@ func _on_custom_class_selected() -> void:
 	
 	var row = active_dropdown_for_custom.get_parent() as HBoxContainer
 	if row:
-		var default_container = row.get_child(4) as HBoxContainer
+		var array_cb = row.get_child(3) as CheckBox
+		var default_container = row.get_child(5) as HBoxContainer
 		var card = row.get_parent().get_parent() as PanelContainer
-		_rebuild_default_value_ui(default_container, chosen_class, null, card)
+		_rebuild_default_value_ui(default_container, chosen_class, null, card, array_cb.button_pressed)
 		_mark_row_dirty(card)
 		
 	active_dropdown_for_custom = null
 
 
-## Called when the user cancels or closes the type selection popup to safely revert the UI.
 func _on_class_picker_canceled() -> void:
 	if is_instance_valid(active_dropdown_for_custom):
 		active_dropdown_for_custom.selected = BASE_TYPES.find("String")
 		
 		var row = active_dropdown_for_custom.get_parent() as HBoxContainer
 		if row:
-			var default_container = row.get_child(4) as HBoxContainer
+			var array_cb = row.get_child(3) as CheckBox
+			var default_container = row.get_child(5) as HBoxContainer
 			var card = row.get_parent().get_parent() as PanelContainer
-			_rebuild_default_value_ui(default_container, "String", null, card)
+			_rebuild_default_value_ui(default_container, "String", null, card, array_cb.button_pressed)
 			_mark_row_dirty(card)
 			
 		active_dropdown_for_custom = null
 
 
-## Helper trigger for pre-compilation error prompts.
 func _show_validation_error(msg: String) -> void:
 	validation_dialog.dialog_text = msg
 	validation_dialog.popup_centered()
 
 
-## Fired via signals to validate inputs instantly upon user completion (Enter/Click-away).
 func _validate_real_time(edit: LineEdit) -> void:
 	var raw_name := edit.text.strip_edges()
 	
@@ -733,12 +717,10 @@ func _validate_real_time(edit: LineEdit) -> void:
 		edit.text = ""
 
 
-## Dynamically injects context-specific Input UI for Default Values based on the property type.
-func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant, card: PanelContainer) -> void:
+func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant, card: PanelContainer, is_array: bool = false) -> void:
 	for child in container.get_children():
 		child.queue_free()
 		
-	# Store the parent card so the resource picker popup can flag it!
 	container.set_meta("parent_card", card)
 	
 	if container.get_meta("is_core_identifier", false):
@@ -748,7 +730,14 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		container.add_child(lbl)
 		return
 		
-	# Safe metadata assignment lambda (prevents setting meta to null which deletes it)
+	if is_array:
+		var lbl := Label.new()
+		lbl.text = " [] (Array Container)"
+		lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+		container.add_child(lbl)
+		container.set_meta("default_val", [])
+		return
+		
 	var set_safe_meta = func(val: Variant):
 		if val != null:
 			container.set_meta("default_val", val)
@@ -921,7 +910,6 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		container.add_child(hbox)
 
 
-## Spawns the Godot QuickOpen dialog to let users find a default asset.
 func _open_resource_picker_for_default(class_type: String) -> void:
 	var base_types := PackedStringArray()
 	if class_type == "Texture2D" or class_type == "Texture":
@@ -936,7 +924,6 @@ func _open_resource_picker_for_default(class_type: String) -> void:
 	EditorInterface.popup_quick_open(_on_default_resource_selected, base_types)
 
 
-## Handles the return signal from the default resource quick-picker.
 func _on_default_resource_selected(path: String) -> void:
 	if path.is_empty() or not is_instance_valid(active_default_container): 
 		return
@@ -957,7 +944,6 @@ func _on_default_resource_selected(path: String) -> void:
 
 
 #region File & Compilation
-## Triggers the closing of the active schema, warning the user if unsaved changes exist.
 func _on_close_schema_pressed() -> void:
 	if is_dirty:
 		close_schema_confirm.popup_centered()
@@ -965,7 +951,6 @@ func _on_close_schema_pressed() -> void:
 		_execute_close_schema()
 
 
-## Safely unloads the active schema from the workspace and resets the UI.
 func _execute_close_schema() -> void:
 	active_script_path = ""
 	is_dirty = false
@@ -974,7 +959,6 @@ func _execute_close_schema() -> void:
 	_update_ui_state()
 
 
-## Discards all unsaved edits and completely reloads the schema structure from the disk script.
 func _execute_revert_schema() -> void:
 	if active_script_path.is_empty():
 		return
@@ -982,7 +966,6 @@ func _execute_revert_schema() -> void:
 	_on_load_picker_confirmed(active_script_path)
 
 
-## Prompts the editor file browser to construct a pristine script destination.
 func _on_new_schema_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
@@ -1001,7 +984,6 @@ func _on_new_schema_pressed() -> void:
 	dialog.popup_centered_ratio(0.5)
 
 
-## Opens Godot's native File Dialog to securely find and load any .gd Schema Script.
 func _on_load_schema_pressed() -> void:
 	var dialog := EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
@@ -1014,7 +996,6 @@ func _on_load_schema_pressed() -> void:
 	dialog.popup_centered_ratio(0.5)
 
 
-## Extracts the selected script from the native loader and rebuilds the UI structure.
 func _on_load_picker_confirmed(path: String) -> void:
 	if path.is_empty(): return
 	
@@ -1030,27 +1011,48 @@ func _on_load_picker_confirmed(path: String) -> void:
 	
 	add_blank_property_row("row_id", "StringName")
 	
-	# Instantiating a temporary object allows us to extract default values securely
 	var temp_instance = loaded_script.new()
 	
-	# Read all valid properties from the schema script natively
+	# We physically read the source file string to reliably extract Typed Array data
+	var file_access := FileAccess.open(path, FileAccess.READ)
+	var source_lines := PackedStringArray()
+	if file_access:
+		source_lines = file_access.get_as_text().split("\n")
+	
 	for prop: Dictionary in loaded_script.get_script_property_list():
 		if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
 			if prop["name"] == "row_id":
 				continue
 				
 			var type_str: String = prop.get("class_name", "")
+			var is_array: bool = false
+			var default_val = temp_instance.get(prop["name"])
+			
+			for line in source_lines:
+				var clean_line = line.strip_edges()
+				if clean_line.begins_with("@export var " + prop["name"] + ":"):
+					var type_part = clean_line.split(":")[1].split("=")[0].strip_edges()
+					if type_part.begins_with("Array["):
+						is_array = true
+						type_str = type_part.trim_prefix("Array[").trim_suffix("]")
+					elif type_part == "Array":
+						is_array = true
+						type_str = "Variant"
+					else:
+						# Fallback assignment if class_name was empty but it's not an array
+						if type_str.is_empty():
+							type_str = type_part
+					break
+					
 			if type_str.is_empty():
 				type_str = _fallback_type_to_string(prop["type"])
 				
-			var default_val = temp_instance.get(prop["name"])
-			add_blank_property_row(prop["name"], type_str, default_val)
+			add_blank_property_row(prop["name"], type_str, default_val, is_array)
 			
 	is_dirty = false
 	_update_ui_state()
 
 
-## Compiles layout row matrices into a strongly typed system file via FileAccess.
 func _on_compile_pressed() -> void:
 	if active_script_path.is_empty():
 		return
@@ -1061,7 +1063,6 @@ func _on_compile_pressed() -> void:
 			script_open_warning.popup_centered()
 			return
 			
-	# PRE-COMPILE FULL VALIDATION PASS
 	var user_prop_count: int = 0
 	var valid_names: Array[String] = []
 	var regex := RegEx.new()
@@ -1096,7 +1097,6 @@ func _on_compile_pressed() -> void:
 		_show_validation_error("You must define at least one property (other than row_id) to compile a schema.")
 		return
 		
-	# WRITE PASS
 	var file := FileAccess.open(active_script_path, FileAccess.WRITE)
 	if not file:
 		printerr("GodotDataTables: Failed to open path for script generation: ", active_script_path)
@@ -1113,7 +1113,8 @@ func _on_compile_pressed() -> void:
 		var row := card.get_child(0).get_child(0) as HBoxContainer
 		var name_edit := row.get_child(0) as LineEdit
 		var type_drop := row.get_child(2) as OptionButton
-		var default_container := row.get_child(4) as HBoxContainer
+		var array_cb := row.get_child(3) as CheckBox
+		var default_container := row.get_child(5) as HBoxContainer
 		
 		var raw_name := name_edit.text.strip_edges()
 		if raw_name == "row_id":
@@ -1121,47 +1122,56 @@ func _on_compile_pressed() -> void:
 			
 		raw_name = raw_name.to_snake_case()
 		var type_string := type_drop.get_item_text(type_drop.selected)
+		var is_array := array_cb.button_pressed
 		
 		if type_string.is_empty() or type_string == "Custom Resource..." or type_string == "All Native Types...":
 			type_string = "Variant"
 			
-		# Compile context-aware default values safely
-		var def_val: Variant = null
-		if default_container.has_meta("default_val"):
-			def_val = default_container.get_meta("default_val")
-			
-		var default_string := ""
-		if def_val != null:
-			if type_string == "String":
-				if str(def_val) != "":
-					default_string = " = \"%s\"" % str(def_val).replace("\"", "\\\"")
-			elif type_string == "StringName":
-				if str(def_val) != "":
-					default_string = " = &\"%s\"" % str(def_val).replace("\"", "\\\"")
-			elif type_string == "int" or type_string == "float":
-				default_string = " = %s" % str(def_val)
-			elif type_string == "bool":
-				default_string = " = %s" % str(def_val).to_lower()
-			elif type_string == "Color":
-				default_string = " = Color(%f, %f, %f, %f)" % [def_val.r, def_val.g, def_val.b, def_val.a]
-			elif type_string == "Vector2" or type_string == "Vector3":
-				# Native Godot serialization prevents parsing crashes
-				if typeof(def_val) == TYPE_VECTOR2 or typeof(def_val) == TYPE_VECTOR3:
-					default_string = " = %s" % var_to_str(def_val)
-			else: # Resources/Objects
-				var path := ""
-				if typeof(def_val) == TYPE_STRING:
-					path = def_val
-				elif typeof(def_val) == TYPE_OBJECT and def_val is Resource:
-					path = def_val.resource_path
-					
-				if not path.is_empty():
-					default_string = " = preload(\"%s\")" % path
+		var export_line := ""
 		
-		file.store_line("@export var %s: %s%s" % [raw_name, type_string, default_string])
+		# Build Array Exports perfectly typed for Godot 4
+		if is_array:
+			if type_string == "Variant":
+				export_line = "@export var %s: Array = []" % raw_name
+			else:
+				export_line = "@export var %s: Array[%s] = []" % [raw_name, type_string]
+		else:
+			var def_val: Variant = null
+			if default_container.has_meta("default_val"):
+				def_val = default_container.get_meta("default_val")
+				
+			var default_string := ""
+			if def_val != null:
+				if type_string == "String":
+					if str(def_val) != "":
+						default_string = " = \"%s\"" % str(def_val).replace("\"", "\\\"")
+				elif type_string == "StringName":
+					if str(def_val) != "":
+						default_string = " = &\"%s\"" % str(def_val).replace("\"", "\\\"")
+				elif type_string == "int" or type_string == "float":
+					default_string = " = %s" % str(def_val)
+				elif type_string == "bool":
+					default_string = " = %s" % str(def_val).to_lower()
+				elif type_string == "Color":
+					default_string = " = Color(%f, %f, %f, %f)" % [def_val.r, def_val.g, def_val.b, def_val.a]
+				elif type_string == "Vector2" or type_string == "Vector3":
+					if typeof(def_val) == TYPE_VECTOR2 or typeof(def_val) == TYPE_VECTOR3:
+						default_string = " = %s" % var_to_str(def_val)
+				else: 
+					var path := ""
+					if typeof(def_val) == TYPE_STRING:
+						path = def_val
+					elif typeof(def_val) == TYPE_OBJECT and def_val is Resource:
+						path = def_val.resource_path
+						
+					if not path.is_empty():
+						default_string = " = preload(\"%s\")" % path
+			
+			export_line = "@export var %s: %s%s" % [raw_name, type_string, default_string]
+			
+		file.store_line(export_line)
 		
 	file.close()
-	
 	EditorInterface.get_resource_filesystem().scan()
 	
 	is_dirty = false
@@ -1172,7 +1182,6 @@ func _on_compile_pressed() -> void:
 	success_dialog.popup_centered()
 
 
-## Converts engine type constants to user-friendly strings for UI mapping.
 func _fallback_type_to_string(type_enum: int) -> String:
 	match type_enum:
 		TYPE_STRING: return "String"

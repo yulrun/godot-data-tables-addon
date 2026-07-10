@@ -4,7 +4,7 @@
 ## against. All generated row schemas (e.g., SkillsDataStructure) will extend this class.
 ##
 ## @meta_addon: Godot DataTables 1.0.0
-## @meta_author: Matthew Janes (YulRun Dev)
+## @meta_author: Matthew Janes (https://yulrun.dev)
 ## @meta_license: MIT 
 
 @icon("res://addons/GodotDataTables/icons/data_table_structure.svg")
