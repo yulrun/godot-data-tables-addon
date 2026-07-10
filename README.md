@@ -1,4 +1,4 @@
-[Buy me a Coffee!](https://ko-fi.com/yulrundev) | [Discord](https://discord.gg/bW5pvcdK5j)
+[☕ Buy me a Coffee!](https://ko-fi.com/yulrundev) | [Discord](https://discord.gg/bW5pvcdK5j)
 
 # Godot DataTables
 **A Native, Strongly-Typed DataTable Framework for Godot 4.7+**
@@ -6,6 +6,9 @@
 Godot DataTables is a robust, code-generated framework written entirely in GDScript, bringing Unreal Engine's renowned "DataTable" paradigm directly into Godot. It provides a highly scalable, visual workflow for managing complex datasets like items, abilities, dialogue, and NPC stats.
 
 While standard systems rely on generic JSON or CSV files that ruin static typing and lack engine integration, Godot DataTables allows you to seamlessly drag-and-drop native resources (like Textures or PackedScenes), utilize strict typing for perfect IDE autocomplete, and reference data safely to completely eliminate runtime typo crashes.
+
+![Data Table Dock](/github_images/data_table_dock.png)
+![Data Structure Dock](/github_images/data_structure_dock.png)
 
 ---
 
