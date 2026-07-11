@@ -60,6 +60,9 @@ var active_sort_direction: int = 0
 ## Dialog explicitly for editing dynamic Arrays
 var array_edit_dialog: ConfirmationDialog
 
+## Filter bar specifically for the Array Popup
+var array_filter_bar: LineEdit
+
 ## Tree nested inside the Array Editor Dialog
 var array_edit_tree: Tree
 
@@ -298,6 +301,17 @@ func _initialize_dynamic_dialogs() -> void:
 	array_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	array_edit_dialog.add_child(array_vbox)
 	
+	var array_toolbar := HBoxContainer.new()
+	array_vbox.add_child(array_toolbar)
+	
+	array_filter_bar = LineEdit.new()
+	array_filter_bar.placeholder_text = "Filter Elements..."
+	array_filter_bar.clear_button_enabled = true
+	array_filter_bar.right_icon = _get_safe_theme_icon("Search")
+	array_filter_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	array_filter_bar.text_changed.connect(_on_array_filter_text_changed)
+	array_toolbar.add_child(array_filter_bar)
+	
 	array_edit_tree = Tree.new()
 	array_edit_tree.columns = 4 # We use 4 columns to bypass Godot's Tree node text-squishing bug
 	array_edit_tree.set_column_title(0, "!")
@@ -313,7 +327,7 @@ func _initialize_dynamic_dialogs() -> void:
 	array_edit_tree.set_column_custom_minimum_width(3, 60)
 	array_edit_tree.set_column_titles_visible(true)
 	array_edit_tree.hide_root = true
-	array_edit_tree.select_mode = Tree.SELECT_ROW
+	array_edit_tree.select_mode = Tree.SELECT_ROW # Whole-row selection hover matching main table
 	array_edit_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	
 	# Hook Array Tree Signals
@@ -324,7 +338,7 @@ func _initialize_dynamic_dialogs() -> void:
 	
 	array_vbox.add_child(array_edit_tree)
 	
-	# Add Element button locked perfectly out of the scroll zone
+	# Add Element button locked perfectly out of the scroll zone at the bottom
 	var btn_array_add := Button.new()
 	btn_array_add.text = "Add Element"
 	btn_array_add.icon = _get_safe_theme_icon("Add")
@@ -465,7 +479,7 @@ func _rebuild_tree_grid() -> void:
 			id_arrow = " ▼"
 	tree.set_column_title(2, "row_id" + id_arrow)
 	tree.set_column_expand(2, false)
-	tree.set_column_custom_minimum_width(2, 150)
+	tree.set_column_custom_minimum_width(2, 350)
 	
 	# Cols 3+: Schema Driven Data
 	for i: int in current_schema_properties.size():
@@ -495,7 +509,7 @@ func _rebuild_tree_grid() -> void:
 func _populate_tree_rows(root: TreeItem) -> void:
 	var validation_results: Dictionary = active_table.validate_all_rows()
 	
-	# Cache a fresh schema instance outside the loop to cleanly extract perfect array types
+	# Cache a fresh schema instance outside the loop to perfectly extract natively compiled typed arrays
 	var temp_schema = null
 	if is_instance_valid(active_table) and is_instance_valid(active_table.row_schema):
 		temp_schema = active_table.row_schema.get_script().new()
@@ -599,41 +613,42 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				item.set_editable(col_idx, not is_locked)
 				
 			elif expected_type == TYPE_ARRAY:
-				# 1. Ensure Array strict typing matches schema perfectly via explicit type_convert iteration
-				var schema_arr: Array = []
-				if temp_schema:
-					schema_arr = temp_schema.get(prop["name"])
-					
-				if value == null or typeof(value) != TYPE_ARRAY or not (value as Array).is_same_typed(schema_arr):
+				# 1. Parse the perfect blueprint safely from our cached script properties
+				var arr_info = _get_array_info_from_prop(prop)
+				var subtype_enum: int = arr_info["type"]
+				var subtype_class: String = arr_info["class_name"]
+				
+				# 2. Extract perfect array type from a temporary schema instance
+				var schema_arr: Array = temp_schema.get(prop["name"]) if temp_schema else []
+				var val_arr: Array = value as Array if value != null else []
+				
+				if not val_arr.is_same_typed(schema_arr):
 					var new_arr: Array = schema_arr.duplicate(true)
-					if value != null and typeof(value) == TYPE_ARRAY:
-						var old_arr: Array = value as Array
-						var target_type: int = new_arr.get_typed_builtin() if new_arr.is_typed() else TYPE_NIL
-						new_arr.resize(old_arr.size())
-						for arr_i in range(old_arr.size()):
-							if target_type != TYPE_NIL and typeof(old_arr[arr_i]) != target_type:
-								new_arr[arr_i] = type_convert(old_arr[arr_i], target_type)
-							else:
-								new_arr[arr_i] = old_arr[arr_i]
+					new_arr.resize(val_arr.size())
+					
+					var target_type: int = new_arr.get_typed_builtin() if new_arr.is_typed() else TYPE_NIL
+					for arr_i in range(val_arr.size()):
+						var item_val = val_arr[arr_i]
+						if target_type != TYPE_NIL and typeof(item_val) != target_type and item_val != null:
+							if target_type != TYPE_OBJECT:
+								new_arr[arr_i] = type_convert(item_val, target_type)
+						else:
+							new_arr[arr_i] = item_val
+							
 					value = new_arr
 					row_data.set(prop["name"], value)
 					_mark_row_dirty(id)
+					val_arr = value
 					
-				# 2. Extract Native Godot Type Info for UI Display
-				var array_type_str := "Variant[]"
-				var val_arr: Array = value as Array 
-				
-				if val_arr.is_typed():
-					var builtin: int = val_arr.get_typed_builtin()
-					if builtin != TYPE_NIL and builtin != TYPE_OBJECT:
-						array_type_str = _get_type_to_string(builtin) + "[]"
+				# 3. Construct accurate UI Display text
+				var final_type_name := "Variant"
+				if subtype_enum != TYPE_NIL:
+					if subtype_enum == TYPE_OBJECT and not subtype_class.is_empty():
+						final_type_name = subtype_class
 					else:
-						var cname: StringName = val_arr.get_typed_class_name() 
-						if not cname.is_empty():
-							array_type_str = str(cname) + "[]"
-						else:
-							array_type_str = "Resource[]"
-							
+						final_type_name = _get_type_to_string(subtype_enum)
+						
+				var array_type_str = final_type_name + "[]"
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_STRING)
 				item.set_text(col_idx, array_type_str + " (Size: " + str(val_arr.size()) + ")")
 				item.set_editable(col_idx, false)
@@ -647,6 +662,25 @@ func _populate_tree_rows(root: TreeItem) -> void:
 		var action_col: int = tree.columns - 1
 		item.add_button(action_col, _get_safe_theme_icon("ActionCopy"), 0, is_locked, "Duplicate Row")
 		item.add_button(action_col, _get_safe_theme_icon("Remove"), 1, is_locked, "Delete Row")
+
+
+## Safely extracts exact Array typing directly from the schema property list to bypass Variant caching issues.
+func _get_array_info_from_prop(prop: Dictionary) -> Dictionary:
+	var info = {"type": TYPE_NIL, "class_name": ""}
+	var hint_string: String = prop.get("hint_string", "")
+	
+	if prop.get("type") == TYPE_ARRAY and not hint_string.is_empty():
+		var parts = hint_string.split(":")
+		var type_parts = parts[0].split("/")
+		info["type"] = type_parts[0].to_int()
+		
+		if info["type"] == TYPE_OBJECT:
+			if parts.size() > 1:
+				info["class_name"] = parts[1]
+			else:
+				info["class_name"] = "Resource"
+				
+	return info
 
 
 ## Sweeps through all visible rows and dynamically applies background color overrides.
@@ -716,19 +750,6 @@ func _get_type_to_string(type_enum: int) -> String:
 		TYPE_COLOR: return "Color"
 		TYPE_OBJECT: return "Resource"
 		_: return "Variant"
-
-
-## Parses PROPERTY_HINT_ARRAY_TYPE (24) hint string to get array subtype and class.
-func _get_array_subtype(prop: Dictionary) -> Dictionary:
-	var info = {"type": TYPE_NIL, "class_name": ""}
-	if prop.get("hint") == 24: # PROPERTY_HINT_ARRAY_TYPE
-		var hs: String = prop.get("hint_string", "")
-		if not hs.is_empty():
-			var parts = hs.split(":")
-			info["type"] = parts[0].split("/")[0].to_int()
-			if parts.size() > 1:
-				info["class_name"] = parts[1]
-	return info
 #endregion
 
 
@@ -789,7 +810,7 @@ func _on_item_activated() -> void:
 		var base_types := PackedStringArray()
 		if class_type == "Texture2D" or class_type == "Texture": base_types.append("Texture2D")
 		elif class_type == "PackedScene": base_types.append("PackedScene")
-		elif not class_type.is_empty(): base_types.append(class_type)
+		elif not class_type.is_empty() and class_type != "Resource": base_types.append(class_type)
 		else: base_types.append("Resource")
 		
 		EditorInterface.popup_quick_open(_on_resource_file_selected, base_types)
@@ -798,13 +819,17 @@ func _on_item_activated() -> void:
 		is_editing_array_element = false
 		active_cell_item = item
 		active_cell_column = col
+		
+		# CRITICAL: Save the actual property schema dict so the popup knows the absolute truth!
 		active_array_prop = prop
 		
 		if val == null:
-			active_array_ref = active_table.row_schema.get_script().new().get(prop_name).duplicate(true)
+			var temp_schema = active_table.row_schema.get_script().new()
+			active_array_ref = temp_schema.get(prop_name).duplicate(true)
 		else:
 			active_array_ref = val.duplicate(true)
 			
+		array_filter_bar.text = ""
 		_populate_array_edit_tree()
 		array_edit_dialog.popup_centered(Vector2(600, 500))
 
@@ -1060,7 +1085,7 @@ func _on_cell_edited() -> void:
 			item.set_text(col, var_to_str(new_value))
 
 
-## Applies the resource selected via the Quick Open dialog. Supports array and main table routing.
+## Applies the resource selected via the Quick Open dialog with strict schema validation.
 func _on_resource_file_selected(path: String) -> void:
 	if path.is_empty(): return
 	var loaded_res: Resource = load(path)
@@ -1069,6 +1094,23 @@ func _on_resource_file_selected(path: String) -> void:
 	if is_editing_array_element:
 		if not is_instance_valid(active_array_cell_item): return
 		var idx: int = active_array_cell_item.get_metadata(0)
+		
+		var arr_info = _get_array_info_from_prop(active_array_prop)
+		var req_class = arr_info["class_name"]
+		
+		if not req_class.is_empty() and req_class != "Resource":
+			var is_valid = false
+			if loaded_res.is_class(req_class):
+				is_valid = true
+			else:
+				var script = loaded_res.get_script()
+				if script and script.get_global_name() == req_class:
+					is_valid = true
+			
+			if not is_valid:
+				printerr("GodotDataTables: Selected resource does not match schema required array type: ", req_class)
+				return
+				
 		active_array_ref[idx] = loaded_res
 		_populate_array_edit_tree()
 		return
@@ -1077,9 +1119,24 @@ func _on_resource_file_selected(path: String) -> void:
 	if not is_instance_valid(active_cell_item): return
 	var row_id: StringName = active_cell_item.get_metadata(0)
 	var prop_idx: int = active_cell_column - 3
-	var prop_name: StringName = current_schema_properties[prop_idx]["name"]
+	var prop: Dictionary = current_schema_properties[prop_idx]
+	var prop_name: StringName = prop["name"]
 	var row_instance: DataStructure = active_table.get_row(row_id)
 	
+	var req_class: String = prop.get("class_name", "")
+	if not req_class.is_empty() and req_class != "Resource":
+		var is_valid = false
+		if loaded_res.is_class(req_class):
+			is_valid = true
+		else:
+			var script = loaded_res.get_script()
+			if script and script.get_global_name() == req_class:
+				is_valid = true
+		
+		if not is_valid:
+			printerr("GodotDataTables: Selected resource does not match schema required type: ", req_class)
+			return
+			
 	if row_instance.get(prop_name) == loaded_res: return
 	row_instance.set(prop_name, loaded_res)
 	active_table.emit_changed()
@@ -1358,10 +1415,6 @@ func _execute_revert_table() -> void:
 	if active_table_path.is_empty(): return
 	is_locked = false
 	
-	# FORCE DEEP CACHE RESET:
-	# Godot aggressively caches sub-resources within Dictionaries.
-	# By explicitly emptying the table in memory before we reload,
-	# we force the engine to parse fresh row instances directly from the disk!
 	if is_instance_valid(active_table):
 		active_table.clear_table()
 		
@@ -1393,8 +1446,6 @@ func _on_load_table_pressed() -> void:
 func _on_load_picker_confirmed(path: String) -> void:
 	if path.is_empty(): return
 	
-	# CRITICAL: We must use CACHE_MODE_REPLACE to bypass Godot's memory cache.
-	# Otherwise, 'reverting' will just load the dirty in-memory version instead of the disk file!
 	var loaded_res := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REPLACE)
 	
 	if loaded_res is DataTable:
@@ -1540,8 +1591,8 @@ func _populate_array_edit_tree() -> void:
 	array_edit_tree.clear()
 	var root: TreeItem = array_edit_tree.create_item()
 	
-	var is_typed: bool = active_array_ref.is_typed()
-	var array_subtype: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
+	var arr_info = _get_array_info_from_prop(active_array_prop)
+	var array_subtype = arr_info["type"]
 	
 	for i: int in active_array_ref.size():
 		var val: Variant = active_array_ref[i]
@@ -1620,15 +1671,38 @@ func _populate_array_edit_tree() -> void:
 		item.add_button(3, _get_safe_theme_icon("Remove"), 1, false, "Delete Element")
 
 
+## Hides or reveals rows natively in the Array Tree based on the search input.
+func _on_array_filter_text_changed(new_text: String) -> void:
+	var root: TreeItem = array_edit_tree.get_root()
+	if not root: return
+	
+	var query := new_text.to_lower()
+	var child: TreeItem = root.get_first_child()
+	
+	while child:
+		if query.is_empty():
+			child.visible = true
+		else:
+			var match_found := false
+			
+			if str(child.get_text(1)).contains(query):
+				match_found = true
+			else:
+				var cell_text: String = child.get_text(2).to_lower()
+				if child.get_cell_mode(2) == TreeItem.CELL_MODE_CHECK:
+					cell_text = "true" if child.is_checked(2) else "false"
+				if cell_text.contains(query):
+					match_found = true
+					
+			child.visible = match_found
+		child = child.get_next()
+
+
 ## Injects a new element into the array safely depending on Godot's internal strict typing logic.
 func _on_array_add_pressed() -> void:
-	if active_array_ref.is_typed():
-		var type = active_array_ref.get_typed_builtin()
-		# Forcing a resize on typed arrays automatically injects Godot's zero-state (e.g. false, 0.0) without crashing!
-		if type != TYPE_NIL and type != TYPE_OBJECT:
-			active_array_ref.resize(active_array_ref.size() + 1)
-		else:
-			active_array_ref.append(null)
+	var arr_info = _get_array_info_from_prop(active_array_prop)
+	if arr_info["type"] != TYPE_NIL and arr_info["type"] != TYPE_OBJECT:
+		active_array_ref.resize(active_array_ref.size() + 1)
 	else:
 		active_array_ref.append(null)
 		
@@ -1642,9 +1716,8 @@ func _on_array_tree_item_edited() -> void:
 	
 	if col == 2:
 		var idx: int = item.get_metadata(0)
-		var is_typed: bool = active_array_ref.is_typed()
-		var array_subtype: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
-		var expected_type: int = array_subtype if array_subtype != TYPE_NIL else typeof(active_array_ref[idx])
+		var arr_info = _get_array_info_from_prop(active_array_prop)
+		var expected_type = arr_info["type"] if arr_info["type"] != TYPE_NIL else typeof(active_array_ref[idx])
 		
 		if expected_type == TYPE_BOOL:
 			active_array_ref[idx] = item.is_checked(2)
@@ -1674,9 +1747,8 @@ func _on_array_item_activated() -> void:
 	
 	var idx: int = item.get_metadata(0)
 	var val: Variant = active_array_ref[idx]
-	var is_typed: bool = active_array_ref.is_typed()
-	var array_subtype: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
-	var expected_type: int = array_subtype if array_subtype != TYPE_NIL else typeof(val)
+	var arr_info = _get_array_info_from_prop(active_array_prop)
+	var expected_type = arr_info["type"] if arr_info["type"] != TYPE_NIL else typeof(val)
 	
 	is_editing_array_element = true
 	active_array_cell_item = item
@@ -1705,10 +1777,8 @@ func _on_array_item_activated() -> void:
 		
 	elif expected_type == TYPE_OBJECT:
 		var base_types := PackedStringArray()
-		var array_class: StringName = active_array_ref.get_typed_class_name() if is_typed else &""
-		
-		if not array_class.is_empty():
-			base_types.append(array_class)
+		if not arr_info["class_name"].is_empty() and arr_info["class_name"] != "Resource":
+			base_types.append(arr_info["class_name"])
 		else:
 			base_types.append("Resource")
 			
@@ -1770,9 +1840,8 @@ func _can_array_drop_data_fw(at_position: Vector2, data: Variant) -> bool:
 		
 	if data["type"] == "files":
 		array_edit_tree.drop_mode_flags = Tree.DROP_MODE_ON_ITEM
-		var is_typed: bool = active_array_ref.is_typed()
-		var expected_type: int = active_array_ref.get_typed_builtin() if is_typed else TYPE_NIL
-		if expected_type == TYPE_OBJECT or expected_type == TYPE_NIL:
+		var arr_info = _get_array_info_from_prop(active_array_prop)
+		if arr_info["type"] == TYPE_OBJECT or arr_info["type"] == TYPE_NIL:
 			return true
 			
 	return false
