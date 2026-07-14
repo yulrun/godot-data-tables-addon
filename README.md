@@ -19,7 +19,7 @@ While standard systems rely on generic JSON or CSV files that ruin static typing
 ## Full Documentation
 This README provides a high-level overview. For the complete setup guide, deep dives into the architecture, and API references, please visit the official documentation:
 
-**[Godot DataTables Official Documentation](#)**
+**[Godot DataTables Official Documentation](https://www.yulrun.dev/GodotDataTables/)**
 
 ---
 
