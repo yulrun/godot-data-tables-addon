@@ -562,6 +562,9 @@ func _populate_tree_rows(root: TreeItem) -> void:
 			var type_name: String = _get_type_to_string(expected_type)
 			if expected_type == TYPE_OBJECT and not prop.get("class_name", "").is_empty():
 				type_name = prop["class_name"]
+			if prop.get("hint") == PROPERTY_HINT_ENUM:
+				type_name = "Enum"
+				
 			if expected_type != TYPE_ARRAY:
 				item.set_tooltip_text(col_idx, "Type: " + type_name)
 			
@@ -574,7 +577,14 @@ func _populate_tree_rows(root: TreeItem) -> void:
 				_:
 					item.set_text_alignment(col_idx, HORIZONTAL_ALIGNMENT_LEFT)
 			
-			if expected_type == TYPE_BOOL:
+			if prop.get("hint") == PROPERTY_HINT_ENUM:
+				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_RANGE)
+				item.set_text(col_idx, prop.get("hint_string", ""))
+				item.set_range(col_idx, float(value) if value != null else 0.0)
+				item.set_editable(col_idx, not is_locked)
+				item.set_text_alignment(col_idx, HORIZONTAL_ALIGNMENT_LEFT)
+				
+			elif expected_type == TYPE_BOOL:
 				item.set_cell_mode(col_idx, TreeItem.CELL_MODE_CHECK)
 				item.set_checked(col_idx, value as bool)
 				item.set_editable(col_idx, not is_locked)
@@ -862,7 +872,8 @@ func _on_cell_context_menu_id_pressed(id: int) -> void:
 	
 	if id == 0: # Clear Cell
 		var empty_val = null
-		if prop["type"] == TYPE_STRING or prop["type"] == TYPE_STRING_NAME: empty_val = ""
+		if prop.get("hint") == PROPERTY_HINT_ENUM: empty_val = 0
+		elif prop["type"] == TYPE_STRING or prop["type"] == TYPE_STRING_NAME: empty_val = ""
 		elif prop["type"] == TYPE_INT or prop["type"] == TYPE_FLOAT: empty_val = 0
 		elif prop["type"] == TYPE_BOOL: empty_val = false
 		elif prop["type"] == TYPE_VECTOR2: empty_val = Vector2.ZERO
@@ -994,6 +1005,13 @@ func _on_filter_text_changed(new_text: String) -> void:
 					var cell_text: String = child.get_text(col).to_lower()
 					if child.get_cell_mode(col) == TreeItem.CELL_MODE_CHECK:
 						cell_text = "true" if child.is_checked(col) else "false"
+					elif child.get_cell_mode(col) == TreeItem.CELL_MODE_RANGE:
+						# For enums, get the actual selected text from the string list based on the numeric value
+						var options = child.get_text(col).split(",")
+						var index = int(child.get_range(col))
+						if index >= 0 and index < options.size():
+							cell_text = options[index].to_lower()
+					
 					if cell_text.contains(query):
 						match_found = true
 						break
@@ -1054,11 +1072,15 @@ func _on_cell_edited() -> void:
 		var prop: Dictionary = current_schema_properties[prop_idx]
 		var prop_name: StringName = prop["name"]
 		var expected_type: int = prop["type"]
+		var is_enum: bool = prop.get("hint") == PROPERTY_HINT_ENUM
+		
 		var row_instance: DataStructure = active_table.get_row(original_id)
 		var current_value: Variant = row_instance.get(prop_name)
 		var new_value: Variant = current_value
 		
-		if expected_type == TYPE_BOOL:
+		if is_enum:
+			new_value = int(item.get_range(col))
+		elif expected_type == TYPE_BOOL:
 			new_value = item.is_checked(col)
 		elif expected_type == TYPE_STRING or expected_type == TYPE_STRING_NAME:
 			new_value = item.get_text(col)
@@ -1073,7 +1095,7 @@ func _on_cell_edited() -> void:
 					new_value = casted_value
 					
 		if current_value == new_value:
-			if expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
+			if not is_enum and expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
 				item.set_text(col, var_to_str(current_value))
 			return
 			
@@ -1081,7 +1103,7 @@ func _on_cell_edited() -> void:
 		active_table.emit_changed()
 		_mark_row_dirty(original_id)
 		
-		if expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
+		if not is_enum and expected_type != TYPE_STRING and expected_type != TYPE_STRING_NAME and expected_type != TYPE_BOOL:
 			item.set_text(col, var_to_str(new_value))
 
 
@@ -1095,6 +1117,7 @@ func _on_resource_file_selected(path: String) -> void:
 		if not is_instance_valid(active_array_cell_item): return
 		var idx: int = active_array_cell_item.get_metadata(0)
 		
+		# Absolute Validation: Check the selected resource against the absolute truth of our stored property dictionary
 		var arr_info = _get_array_info_from_prop(active_array_prop)
 		var req_class = arr_info["class_name"]
 		

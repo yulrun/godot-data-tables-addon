@@ -20,7 +20,7 @@ enum SearchMode {
 const BASE_TYPES: Array[String] = [
 	"String", "StringName", "int", "float", "bool", 
 	"Vector2", "Vector3", "Color", 
-	"Texture2D", "PackedScene", "Resource"
+	"Texture2D", "PackedScene", "Resource", "Enum"
 ]
 
 const EXTRA_VARIANTS: Array[String] = [
@@ -268,7 +268,7 @@ func _on_lock_unlock_pressed() -> void:
 
 
 #region Row Management & Manipulation
-func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null, is_array: bool = false) -> PanelContainer:
+func add_blank_property_row(prop_name: String = "", prop_type_string: String = "String", initial_default_val: Variant = null, is_array: bool = false, enum_options: String = "") -> PanelContainer:
 	var is_core_identifier: bool = (prop_name == "row_id")
 	
 	# 1. The Card Enclosure
@@ -325,7 +325,9 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		type_dropdown.disabled = true
 		
 	for type_str: String in BASE_TYPES:
-		type_dropdown.add_icon_item(_get_safe_theme_icon(type_str), type_str)
+		# Enums don't have a native icon, use Script list icon as a clean fallback
+		var icon_str = "Script" if type_str == "Enum" else type_str
+		type_dropdown.add_icon_item(_get_safe_theme_icon(icon_str), type_str)
 		
 	type_dropdown.add_separator()
 	
@@ -353,7 +355,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		
 	row.add_child(type_dropdown)
 	
-	# 3.5. Is Array Checkbox (Child 3)
+	# 4. Is Array Checkbox (Child 3)
 	var array_cb := CheckBox.new()
 	array_cb.text = "Array?"
 	array_cb.button_pressed = is_array
@@ -364,12 +366,12 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	var v_sep1 := VSeparator.new()
 	row.add_child(v_sep1) # Child 4
 	
-	# 4. Context-Aware Default Value Container (Child 5)
+	# 5. Context-Aware Default Value Container (Child 5)
 	var default_container := HBoxContainer.new()
 	default_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	default_container.set_meta("is_core_identifier", is_core_identifier)
 	
-	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val, card, is_array)
+	_rebuild_default_value_ui(default_container, prop_type_string, initial_default_val, card, is_array, enum_options)
 	
 	array_cb.toggled.connect(func(pressed: bool):
 		var current_type = type_dropdown.get_item_text(type_dropdown.selected)
@@ -381,6 +383,8 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	
 	type_dropdown.item_selected.connect(func(idx: int):
 		_mark_row_dirty(card)
+		
+		var new_type = type_dropdown.get_item_text(idx)
 		if idx == native_idx:
 			active_dropdown_for_custom = type_dropdown
 			current_search_mode = SearchMode.NATIVE
@@ -396,7 +400,6 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 			_populate_class_list()
 			class_picker.popup_centered()
 		else:
-			var new_type = type_dropdown.get_item_text(idx)
 			_rebuild_default_value_ui(default_container, new_type, null, card, array_cb.button_pressed)
 	)
 	
@@ -405,14 +408,14 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	var v_sep2 := VSeparator.new()
 	row.add_child(v_sep2) # Child 6
 	
-	# 5. Move Up Action Button (Child 7)
+	# 6. Move Up Action Button (Child 7)
 	var up_btn := Button.new()
 	up_btn.icon = _get_safe_theme_icon("MoveUp")
 	up_btn.tooltip_text = "Move Property Up"
 	up_btn.pressed.connect(func(): _move_row_up(card))
 	row.add_child(up_btn)
 	
-	# 6. Move Down Action Button (Child 8)
+	# 7. Move Down Action Button (Child 8)
 	var down_btn := Button.new()
 	down_btn.icon = _get_safe_theme_icon("MoveDown")
 	down_btn.tooltip_text = "Move Property Down"
@@ -422,7 +425,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 	var v_sep3 := VSeparator.new()
 	row.add_child(v_sep3) # Child 9
 	
-	# 7. Duplicate Action Button (Child 10)
+	# 8. Duplicate Action Button (Child 10)
 	var duplicate_btn := Button.new()
 	duplicate_btn.icon = _get_safe_theme_icon("ActionCopy")
 	if is_core_identifier:
@@ -435,7 +438,7 @@ func add_blank_property_row(prop_name: String = "", prop_type_string: String = "
 		)
 	row.add_child(duplicate_btn)
 	
-	# 8. Row Removal Action Button (Child 11)
+	# 9. Row Removal Action Button (Child 11)
 	var delete_btn := Button.new()
 	delete_btn.icon = _get_safe_theme_icon("Remove")
 	if is_core_identifier:
@@ -484,7 +487,9 @@ func _set_default_container_locked(container: HBoxContainer, locked: bool) -> vo
 		elif child is SpinBox:
 			child.editable = not locked
 		elif child is LineEdit:
-			child.editable = not locked
+			# Only lock dynamically generated string inputs, leave rigid paths alone
+			if child.placeholder_text == "Default string..." or child.placeholder_text == "Item 1, Item 2":
+				child.editable = not locked
 		elif child is HBoxContainer:
 			for subchild in child.get_children():
 				if subchild is ColorPickerButton:
@@ -563,12 +568,13 @@ func _execute_row_duplication() -> void:
 		var original_name: String = name_edit.text
 		var new_name: String = _get_unique_property_name(original_name)
 		var type_string: String = type_drop.get_item_text(type_drop.selected)
+		var enum_string: String = default_container.get_meta("enum_opts", "")
 		
 		var current_default: Variant = null
 		if default_container.has_meta("default_val"):
 			current_default = default_container.get_meta("default_val")
 		
-		var new_card = add_blank_property_row(new_name, type_string, current_default, array_cb.button_pressed)
+		var new_card = add_blank_property_row(new_name, type_string, current_default, array_cb.button_pressed, enum_string)
 		_mark_row_dirty(new_card)
 		active_row_for_duplication = null
 
@@ -717,17 +723,78 @@ func _validate_real_time(edit: LineEdit) -> void:
 		edit.text = ""
 
 
-func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant, card: PanelContainer, is_array: bool = false) -> void:
+func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initial_val: Variant, card: PanelContainer, is_array: bool = false, initial_enum_opts: String = "") -> void:
 	for child in container.get_children():
 		child.queue_free()
 		
 	container.set_meta("parent_card", card)
+	
+	# Carry over the enum meta state safely through array toggles and initial loads
+	if initial_enum_opts != "":
+		container.set_meta("enum_opts", initial_enum_opts)
+	var enum_opts: String = container.get_meta("enum_opts", "")
 	
 	if container.get_meta("is_core_identifier", false):
 		var lbl := Label.new()
 		lbl.text = " Managed Internally"
 		lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
 		container.add_child(lbl)
+		return
+		
+	var set_safe_meta = func(val: Variant):
+		if val != null:
+			container.set_meta("default_val", val)
+		elif container.has_meta("default_val"):
+			container.remove_meta("default_val")
+			
+	if type_str == "Enum":
+		# 1. The Options Text Box
+		var enum_edit := LineEdit.new()
+		enum_edit.placeholder_text = "Item 1, Item 2"
+		enum_edit.text = enum_opts
+		enum_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		enum_edit.custom_minimum_size = Vector2(150, 0)
+		enum_edit.tooltip_text = "Comma-separated list of enum options"
+		enum_edit.text_changed.connect(func(t: String):
+			container.set_meta("enum_opts", t)
+			_mark_row_dirty(card)
+		)
+		container.add_child(enum_edit)
+		
+		# 2. Array Label OR SpinBox
+		if is_array:
+			var lbl := Label.new()
+			lbl.text = " [] (Array)"
+			lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+			container.add_child(lbl)
+			container.set_meta("default_val", [])
+		else:
+			var actual_val: int = initial_val if typeof(initial_val) == TYPE_INT else 0
+			set_safe_meta.call(actual_val)
+			
+			var sb := SpinBox.new()
+			sb.prefix = "Def Idx: "
+			sb.step = 1
+			sb.allow_greater = true
+			sb.allow_lesser = false
+			
+			var update_max = func(text: String):
+				var parts = text.split(",")
+				var max_idx = maxi(0, parts.size() - 1)
+				sb.max_value = max_idx
+				# Safely clamp down if user deleted elements
+				if sb.value > max_idx:
+					sb.value = max_idx
+					set_safe_meta.call(int(sb.value))
+					
+			update_max.call(enum_opts)
+			
+			sb.value = actual_val
+			sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			sb.value_changed.connect(func(v: float): set_safe_meta.call(int(v)); _mark_row_dirty(card))
+			
+			enum_edit.text_changed.connect(update_max)
+			container.add_child(sb)
 		return
 		
 	if is_array:
@@ -737,12 +804,6 @@ func _rebuild_default_value_ui(container: HBoxContainer, type_str: String, initi
 		container.add_child(lbl)
 		container.set_meta("default_val", [])
 		return
-		
-	var set_safe_meta = func(val: Variant):
-		if val != null:
-			container.set_meta("default_val", val)
-		elif container.has_meta("default_val"):
-			container.remove_meta("default_val")
 			
 	if type_str == "bool":
 		var actual_val: bool = initial_val if typeof(initial_val) == TYPE_BOOL else false
@@ -1013,7 +1074,7 @@ func _on_load_picker_confirmed(path: String) -> void:
 	
 	var temp_instance = loaded_script.new()
 	
-	# We physically read the source file string to reliably extract Typed Array data
+	# We physically read the source file string to reliably extract Typed Array and Enum data
 	var file_access := FileAccess.open(path, FileAccess.READ)
 	var source_lines := PackedStringArray()
 	if file_access:
@@ -1026,11 +1087,15 @@ func _on_load_picker_confirmed(path: String) -> void:
 				
 			var type_str: String = prop.get("class_name", "")
 			var is_array: bool = false
+			var enum_opts: String = ""
 			var default_val = temp_instance.get(prop["name"])
 			
 			for line in source_lines:
 				var clean_line = line.strip_edges()
-				if clean_line.begins_with("@export var " + prop["name"] + ":"):
+				var search_str = "var " + prop["name"] + ":"
+				var search_str_space = "var " + prop["name"] + " :"
+				
+				if search_str in clean_line or search_str_space in clean_line:
 					var type_part = clean_line.split(":")[1].split("=")[0].strip_edges()
 					if type_part.begins_with("Array["):
 						is_array = true
@@ -1042,12 +1107,25 @@ func _on_load_picker_confirmed(path: String) -> void:
 						# Fallback assignment if class_name was empty but it's not an array
 						if type_str.is_empty():
 							type_str = type_part
+							
+					if clean_line.begins_with("@export_enum("):
+						var enum_start = clean_line.find("(") + 1
+						var enum_end = clean_line.find(") var ")
+						if enum_end != -1:
+							var raw_opts = clean_line.substr(enum_start, enum_end - enum_start).strip_edges()
+							var stripped_opts = []
+							for p in raw_opts.split(","):
+								# Dynamically strip file-quotes to keep the UI clean
+								stripped_opts.append(p.strip_edges().trim_prefix("\"").trim_suffix("\"").trim_prefix("'").trim_suffix("'"))
+							enum_opts = ", ".join(stripped_opts)
+							type_str = "Enum" 
+							
 					break
 					
 			if type_str.is_empty():
 				type_str = _fallback_type_to_string(prop["type"])
 				
-			add_blank_property_row(prop["name"], type_str, default_val, is_array)
+			add_blank_property_row(prop["name"], type_str, default_val, is_array, enum_opts)
 			
 	is_dirty = false
 	_update_ui_state()
@@ -1123,18 +1201,36 @@ func _on_compile_pressed() -> void:
 		raw_name = raw_name.to_snake_case()
 		var type_string := type_drop.get_item_text(type_drop.selected)
 		var is_array := array_cb.button_pressed
+		var enum_string: String = default_container.get_meta("enum_opts", "").strip_edges()
 		
 		if type_string.is_empty() or type_string == "Custom Resource..." or type_string == "All Native Types...":
 			type_string = "Variant"
+			
+		# Enums map down to ints for the GDScript engine compiler
+		var actual_type := "int" if type_string == "Enum" else type_string
+			
+		var export_base := "@export"
+		if type_string == "Enum" and not enum_string.is_empty():
+			# Automatically parse and strictly inject Godot quotation marks to prevent compiler errors
+			var parts = enum_string.split(",")
+			var quoted_parts = []
+			for p in parts:
+				var clean_p = p.strip_edges()
+				if clean_p.is_empty(): continue
+				if not clean_p.begins_with("\""): clean_p = "\"" + clean_p
+				if not clean_p.ends_with("\""): clean_p = clean_p + "\""
+				quoted_parts.append(clean_p)
+			var formatted_enum = ", ".join(quoted_parts)
+			export_base = "@export_enum(" + formatted_enum + ")"
 			
 		var export_line := ""
 		
 		# Build Array Exports perfectly typed for Godot 4
 		if is_array:
-			if type_string == "Variant":
-				export_line = "@export var %s: Array = []" % raw_name
+			if actual_type == "Variant":
+				export_line = "%s var %s: Array = []" % [export_base, raw_name]
 			else:
-				export_line = "@export var %s: Array[%s] = []" % [raw_name, type_string]
+				export_line = "%s var %s: Array[%s] = []" % [export_base, raw_name, actual_type]
 		else:
 			var def_val: Variant = null
 			if default_container.has_meta("default_val"):
@@ -1142,19 +1238,19 @@ func _on_compile_pressed() -> void:
 				
 			var default_string := ""
 			if def_val != null:
-				if type_string == "String":
+				if actual_type == "String":
 					if str(def_val) != "":
 						default_string = " = \"%s\"" % str(def_val).replace("\"", "\\\"")
-				elif type_string == "StringName":
+				elif actual_type == "StringName":
 					if str(def_val) != "":
 						default_string = " = &\"%s\"" % str(def_val).replace("\"", "\\\"")
-				elif type_string == "int" or type_string == "float":
+				elif actual_type == "int" or actual_type == "float":
 					default_string = " = %s" % str(def_val)
-				elif type_string == "bool":
+				elif actual_type == "bool":
 					default_string = " = %s" % str(def_val).to_lower()
-				elif type_string == "Color":
+				elif actual_type == "Color":
 					default_string = " = Color(%f, %f, %f, %f)" % [def_val.r, def_val.g, def_val.b, def_val.a]
-				elif type_string == "Vector2" or type_string == "Vector3":
+				elif actual_type == "Vector2" or actual_type == "Vector3":
 					if typeof(def_val) == TYPE_VECTOR2 or typeof(def_val) == TYPE_VECTOR3:
 						default_string = " = %s" % var_to_str(def_val)
 				else: 
@@ -1167,7 +1263,7 @@ func _on_compile_pressed() -> void:
 					if not path.is_empty():
 						default_string = " = preload(\"%s\")" % path
 			
-			export_line = "@export var %s: %s%s" % [raw_name, type_string, default_string]
+			export_line = "%s var %s: %s%s" % [export_base, raw_name, actual_type, default_string]
 			
 		file.store_line(export_line)
 		

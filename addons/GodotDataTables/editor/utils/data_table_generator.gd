@@ -12,7 +12,7 @@ class_name DataTableGenerator extends RefCounted
 
 
 ## Generates a strongly-typed DataStructure .gd script based on the provided schema.
-## Expects 'columns' as an Array of Dictionaries with keys: "name" (String), "type" (String), and optional "default" (String).
+## Expects 'columns' as an Array of Dictionaries with keys: "name" (String), "type" (String), and optional "default" (String) and "enum" (String).
 static func generate_data_structure(schema_name: String, columns: Array[Dictionary]) -> Error:
 	var pascal_name: String = schema_name.to_pascal_case() + "DataStructure"
 	var snake_name: String = schema_name.to_snake_case() + "_data_structure"
@@ -36,11 +36,16 @@ class_name {class_name} extends DataStructure
 		var var_name: String = col.get("name", "unknown_var")
 		var type_string: String = col.get("type", "Variant")
 		var default_val: String = col.get("default", "")
+		var enum_options: String = col.get("enum", "")
+		
+		var export_prefix: String = "@export"
+		if enum_options != "":
+			export_prefix = "@export_enum(%s)" % enum_options
 		
 		if default_val != "":
-			variables_array.append("@export var %s: %s = %s" % [var_name, type_string, default_val])
+			variables_array.append("%s var %s: %s = %s" % [export_prefix, var_name, type_string, default_val])
 		else:
-			variables_array.append("@export var %s: %s" % [var_name, type_string])
+			variables_array.append("%s var %s: %s" % [export_prefix, var_name, type_string])
 			
 	script_content += "\n\n".join(variables_array)
 	

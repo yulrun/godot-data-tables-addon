@@ -162,7 +162,7 @@ layout_mode = 2
 [node name="BtnLockUnlock" type="Button" parent="VBoxContainer/Toolbar" unique_id=586753210]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Lock schema to prevent accidental edits."
+tooltip_text = "Lock table to prevent accidental edits."
 disabled = true
 icon = SubResource("DPITexture_rhp01")
 
@@ -190,7 +190,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 0.5)
-text = "None Loaded (Create or Load a DataTable Resource)"
+text = "None Loaded"
 
 [node name="BtnNewTable" type="Button" parent="VBoxContainer/Toolbar" unique_id=1216440642]
 unique_name_in_owner = true
@@ -266,7 +266,7 @@ icon = SubResource("DPITexture_34bl2")
 [node name="BtnRevert" type="Button" parent="VBoxContainer/FilterToolbar" unique_id=1474484628]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Revert all unsaved changes and reload the schema from disk."
+tooltip_text = "Revert all unsaved changes and reload the table from disk."
 disabled = true
 icon = SubResource("DPITexture_cuwiw")
 
@@ -285,7 +285,7 @@ icon = SubResource("DPITexture_e6nd4")
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 39)
 layout_mode = 2
-tooltip_text = "Save the current table to disk."
+tooltip_text = "Force save the current table to disk."
 disabled = true
 icon = SubResource("DPITexture_prrud")
 
